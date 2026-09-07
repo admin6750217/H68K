@@ -1,0 +1,355 @@
+#
+# Copyright (c) 2019-2020 P3TERX <https://p3terx.com>
+# 原始模板版权声明。
+#
+# This is free software, licensed under the MIT License.
+# 说明这个 workflow 允许在 MIT 许可下使用和修改。
+# See /LICENSE for more information.
+# 细节可查看仓库根目录的 LICENSE 文件。
+#
+# https://github.com/P3TERX/Actions-OpenWrt
+# 原始开源模板来源。
+# Description: Build OpenWrt using GitHub Actions
+# 这个 workflow 的用途：用 GitHub Actions 编译 OpenWrt。
+#
+
+name: rockchip
+# 工作流名称，GitHub Actions 页面里会显示这个名字。
+
+permissions: write-all
+# 给 workflow 写权限，便于后面上传 release、写标签等操作。
+
+on:
+  repository_dispatch:
+  # 接收外部事件触发。
+  workflow_dispatch:
+    inputs:
+      config_only:
+        description: '仅编译基础配置（跳过额外插件脚本）'
+        required: false
+        default: false
+        type: boolean
+  # 允许手动点击运行。
+  schedule:
+   - cron: 0 20 * * 2
+   # 定时触发，UTC 时间每周二 20:00 执行。
+
+env:
+  GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+  # GitHub Actions 自带 token，用于访问仓库和 release。
+  FREE_DISK_SH: scripts/free_disk_space.sh
+  # 清理磁盘空间的脚本。
+  ENV_SH: scripts/environment.sh
+  # 安装编译依赖的脚本。
+  REPO_URL: https://github.com/coolsnowwolf/lede
+  # 要拉取的 OpenWrt 源码地址。
+  REPO_BRANCH: master
+  # 源码分支，这里是 master。
+  PLATFORM_FILE: configs/Target-rockchip-L.txt
+  # 目标设备配置文件，决定编译哪些 rockchip 设备。
+  CONFIG_FILE: configs/Packages.txt
+  # 额外软件包配置文件。
+  CONFIG_5G: configs/Packages-5G.txt
+  # 5G / modem 相关配置文件。
+  SETTINGS_SH: scripts/init-settings.sh
+  # 初始化 OpenWrt 自定义设置的脚本。
+  PACKAGES_SH: scripts/packages.sh
+  # 拉取、替换、删除插件包的脚本。
+  INSTALL5G_SH: scripts/install-5G.sh
+  # 安装 5G 模块支持的脚本。
+  CLASH_CORE_SH: scripts/preset-clash-core-arm64-L.sh
+  # 预置 Clash/Mihomo 内核和规则文件的脚本。
+  VLMCSD_SH: scripts/vlmcsd.sh
+  # 替换 vlmcsd 包的脚本。
+  UPLOAD_BIN_DIR: false
+  # 是否上传整个 bin 目录，默认关闭。
+  UPLOAD_FIRMWARE: false
+  # 是否上传最终固件目录，默认关闭。
+  ONLY_CONFIG: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.config_only || 'false' }}
+  # 手动触发时可选仅编译基础配置。
+  TZ: Asia/Shanghai
+  # 时区设置。
+
+jobs:
+  build:
+    # 定义编译任务。
+    runs-on: ubuntu-latest
+    # 使用 GitHub 提供的 Ubuntu 运行环境。
+
+    steps:
+    - name: 检查代码
+      # 拉取当前仓库的工作流文件、脚本和配置。
+      uses: actions/checkout@main
+
+    - name: 初始化环境
+      # 安装前置环境、释放磁盘、准备编译目录。
+      env:
+        DEBIAN_FRONTEND: noninteractive
+        # 避免 apt 安装时弹交互界面。
+      run: |
+        chmod +x $FREE_DISK_SH && $FREE_DISK_SH
+        # 给磁盘清理脚本加执行权限并执行。
+        chmod +x $ENV_SH && $ENV_SH
+        # 给环境安装脚本加执行权限并执行。
+        sudo rm -rf /etc/apt/sources.list.d/*
+        # 清理额外的 apt 源列表。
+        sudo rm -rf /var/lib/apt/lists/*
+        # 清理 apt 缓存索引。
+        # 设置时区
+        sudo timedatectl set-timezone "$TZ"
+        # 把系统时区设成 Asia/Shanghai。
+        sudo mkdir -p /workdir
+        # 创建工作目录。
+        sudo chown $USER:$GROUPS /workdir
+        # 把工作目录权限交给当前用户。
+
+    - name: 检查空间使用情况（清理情况）
+      # 看一下磁盘清理后剩余空间。
+      if: (!cancelled())
+      run: df -hT
+
+    - name: 克隆源码
+      # 拉取 OpenWrt 源码到 /workdir/openwrt。
+      working-directory: /workdir
+      run: |
+        git clone $REPO_URL --depth 1 -b $REPO_BRANCH openwrt
+        # 浅克隆指定分支源码，减少下载量。
+        ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
+        # 在当前工作区建立软链接，后面脚本统一用 openwrt 路径。
+
+        cd ./openwrt/ && echo "WRT_HASH=$(git log -1 --pretty=format:'%h')" >> $GITHUB_ENV
+        # 把源码最新提交 hash 写入环境变量，供缓存 key 使用。
+
+        # GitHub Action 移除国内下载源
+        PROJECT_MIRRORS_FILE="./scripts/projectsmirrors.json"
+        # OpenWrt 的镜像配置文件路径。
+        if [ -f "$PROJECT_MIRRORS_FILE" ]; then
+          sed -i '/.cn\//d; /tencent/d; /aliyun/d' "$PROJECT_MIRRORS_FILE"
+        fi
+        # 删除中国大陆相关镜像，避免某些环境下下载策略变化。
+
+    - name: 检查缓存
+      # 使用 actions/cache 复用 host/toolchain 缓存。
+      id: check-cache
+      uses: actions/cache@main
+      with:
+        key: rockchip-${{env.REPO_BRANCH}}-${{env.WRT_HASH}}
+        # 缓存 key 由分支名和源码 hash 组成。
+        restore-keys: rockchip-${{env.REPO_BRANCH}}
+        # 允许按分支前缀恢复旧缓存。
+        path: |
+          ./openwrt/.ccache
+          ./openwrt/staging_dir/host*
+          ./openwrt/staging_dir/tool*
+        # 这里缓存 ccache、主机工具链和交叉编译工具链。
+
+    - name: 开启CCACHE配置
+      # 在 .config 里打开开发配置和 ccache。
+      run: |
+        echo 'CONFIG_DEVEL=y' >> openwrt/.config
+        # 开启开发选项。
+        echo 'CONFIG_CCACHE=y' >> openwrt/.config
+        # 开启 ccache 加速。
+
+    - name: 更新缓存
+      # 刷新缓存里的 stamp，避免旧缓存失效。
+      run: |
+        if [ -d "./openwrt/staging_dir" ]; then
+          # 如果 staging_dir 存在，说明有缓存可用。
+          find "./openwrt/staging_dir" -type d -name "stamp" -not -path "*target*" | while read -r DIR; do
+            find "$DIR" -type f -exec touch {} +
+          done
+          # 刷新非 target 目录下 stamp 文件时间戳。
+
+          mkdir -p ./openwrt/tmp && echo "1" > ./openwrt/tmp/.build
+          # 写一个构建标记文件。
+
+          echo "toolchain skiped done!"
+          # 提示工具链缓存已就绪。
+        else
+          echo "caches missed!"
+          # 没有命中缓存。
+        fi
+
+        if ${{steps.check-cache.outputs.cache-hit != 'true'}}; then
+          # 如果没命中缓存，则清理旧缓存。
+          CACHE_LIST=$(gh cache list --key "rockchip-$REPO_BRANCH" | cut -f 1)
+          # 查出同前缀缓存的 ID 列表。
+          for CACHE_KEY in $CACHE_LIST; do
+            gh cache delete $CACHE_KEY
+          done
+          # 逐个删除旧缓存。
+
+          echo "caches cleanup done!"
+          # 提示缓存清理完成。
+        fi
+
+    - name: 安装 feeds
+      # 更新并安装 OpenWrt feeds。
+      run: |
+        cd openwrt
+        ./scripts/feeds update -a
+        # 更新所有 feeds。
+        ./scripts/feeds install -a
+        # 安装所有 feeds 到 package 目录。
+
+    - name: 导入补丁和配置 & 执行脚本
+      # 把本仓库的配置、补丁、脚本导入 OpenWrt 源码树。
+      run: |
+        [ -f $PLATFORM_FILE ] && cat $PLATFORM_FILE >> openwrt/.config
+        # 追加目标设备配置。
+        if [ "$ONLY_CONFIG" != "true" ]; then
+          [ -d files ] && mv files openwrt/files || echo "files not found"
+          # 如果仓库里有 files/，就拷进 OpenWrt 的 files/。
+          [ -f $CONFIG_FILE ] && cat $CONFIG_FILE >> openwrt/.config
+          # 追加插件配置。
+          [ -f $CONFIG_5G ] && cat $CONFIG_5G >> openwrt/.config
+          # 追加 5G 配置。
+          chmod +x $VLMCSD_SH && $VLMCSD_SH
+          # 替换 vlmcsd 包。
+        fi
+        cd openwrt
+        rm target/linux/rockchip/patches-*/991-arm64-dts-rockchip-add-more-cpu-operating-points-for.patch || true
+        # 删除某个 rockchip CPU operating points 补丁，避免冲突或不需要的修改。
+        if [ "$ONLY_CONFIG" != "true" ]; then
+          chmod +x $GITHUB_WORKSPACE/$SETTINGS_SH && $GITHUB_WORKSPACE/$SETTINGS_SH
+          # 执行初始化系统设置脚本。
+          chmod +x $GITHUB_WORKSPACE/$PACKAGES_SH && $GITHUB_WORKSPACE/$PACKAGES_SH
+          # 执行插件包处理脚本。
+          chmod +x $GITHUB_WORKSPACE/$INSTALL5G_SH && $GITHUB_WORKSPACE/$INSTALL5G_SH
+          # 执行 5G 支持脚本。
+          chmod +x $GITHUB_WORKSPACE/$CLASH_CORE_SH && $GITHUB_WORKSPACE/$CLASH_CORE_SH
+          # 预置 Clash 内核和规则文件。
+        fi
+
+    - name: 下载文件
+      # 先做 defconfig，再预下载所有源码包。
+      run: |
+        cd openwrt
+        make defconfig
+        # 根据 .config 生成最终配置。
+        make download -j8 V=10
+        # 并行下载依赖源码包，输出更详细日志。
+        find dl -size -1024c -exec ls -l {} \;
+        # 列出过小的下载文件，通常表示下载失败。
+        find dl -size -1024c -exec rm -f {} \;
+        # 删除损坏或空文件，避免后续编译报错。
+
+    - name: 空间使用情况（编译前）
+      # 编译前再看一次磁盘空间。
+      if: (!cancelled())
+      run: df -hT
+
+    - name: 编译固件
+      # 正式执行编译。
+      id: compile
+      run: |
+        cd openwrt
+        make defconfig
+        # 再次固化最终配置。
+        echo -e "$(nproc) thread compile"
+        # 打印将使用的线程数。
+        make -j$(($(nproc)+1)) || make -j1 V=s
+        # 优先多线程编译，失败就单线程详细输出重试。
+        echo "status=success" >> $GITHUB_OUTPUT
+        # 标记编译成功。
+
+    - name: 生成完整配置
+      # 编译结束后导出最终 .config；即使编译失败，也尽量保留配置用于排查。
+      if: always() && !cancelled()
+      run: |
+        if [ -f openwrt/.config ]; then
+          cp openwrt/.config complete.config
+        fi
+        # 导出最终完整配置文件，供后续保存。
+
+    - name: 上传完整配置
+      # 把最终生成的完整 .config 作为产物上传。
+      uses: actions/upload-artifact@main
+      if: always() && !cancelled()
+      with:
+        name: OpenWrt_full_config
+        path: complete.config
+        if-no-files-found: warn
+
+    - name: 空间使用情况（编译占用）
+      # 看编译中间的磁盘占用。
+      if: (!cancelled())
+      run: df -hT
+
+    - name: 上传 bin 目录
+      # 可选上传整个 bin 目录。
+      uses: actions/upload-artifact@main
+      if: steps.compile.outputs.status == 'success' && env.UPLOAD_BIN_DIR == 'true'
+      with:
+        name: OpenWrt_bin${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+        # 产物名。
+        path: openwrt/bin
+        # 上传 bin 目录。
+
+    - name: 整理文件
+      # 清理中间文件，只保留核心固件产物。
+      id: organize
+      if: steps.compile.outputs.status == 'success' && !cancelled()
+      run: |
+        cd openwrt/bin/targets/*/*
+        rm -rf *.bin
+        # 删除通用 bin 包。
+        rm -rf *.buildinfo
+        # 删除构建信息。
+        rm -rf *.json
+        # 删除 JSON 元数据。
+        rm -rf *.manifest
+        # 删除 manifest。
+        rm -rf packages
+        # 删除 packages 目录。
+        echo "FIRMWARE=$PWD" >> $GITHUB_ENV
+        # 记录最终固件路径。
+        echo "status=success" >> $GITHUB_OUTPUT
+        # 标记整理完成。
+
+    - name: 固件重命名
+      # 调整固件文件名，去掉 rockchip-armv8 前缀。
+      if: steps.organize.outputs.status == 'success' && !cancelled()
+      shell: bash
+      run: |
+        cd openwrt/bin/targets/*/*
+        for file in *rockchip-armv8-*.gz; do
+          new_name=$(echo "$file" | sed 's/rockchip-armv8-//')
+          mv -v "$file" "$new_name"
+        done
+        # 统一输出更短的文件名。
+
+    - name: 上传固件目录
+      # 可选上传最终固件目录到 artifact。
+      uses: actions/upload-artifact@main
+      if: env.UPLOAD_FIRMWARE == 'true' && steps.organize.outputs.status == 'success' && !cancelled()
+      with:
+        name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+        # 固件产物名。
+        path: ${{ env.FIRMWARE }}
+        # 上传整理后的固件目录。
+
+    - name: 生成发布标签
+      # 生成 Release 说明和 tag。
+      id: tag
+      if: steps.compile.outputs.status == 'success' && !cancelled()
+      run: |
+        echo -e "🎉 rockchip平台\n✅ 主线源码\n🍃 如出现不稳定可尝试cpu降频\n❗️ ip地址 : 192.168.8.1" >> release.txt
+        # 写 release 说明。
+        echo "release_tag=$(date +"%Y.%m.%d_Rockchip")" >> $GITHUB_OUTPUT
+        # 生成带日期的 release tag。
+        echo "status=success" >> $GITHUB_OUTPUT
+        # 标记 tag 步骤成功。
+
+    - name: 上传固件到发布
+      # 将固件上传到 GitHub Release。
+      uses: softprops/action-gh-release@master
+      if: steps.tag.outputs.status == 'success' && !cancelled()
+      with:
+        tag_name: ${{ steps.tag.outputs.release_tag }}
+        # Release 标签名。
+        body_path: release.txt
+        # Release 文案来源于 release.txt。
+        files: ${{ env.FIRMWARE }}/*
+        # 上传固件目录中的全部文件。
