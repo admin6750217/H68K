@@ -1,17 +1,15 @@
 # LEDE Rockchip ARM64 / Hinlink OPC-H68K
+
 name: rockchip
 
-# 创建 Release 权限
 permissions:
   contents: write
 
-# H68K 编译任务不并行
 concurrency:
   group: rockchip-h68k
   cancel-in-progress: false
 
 on:
-  # 手动编译
   workflow_dispatch:
     inputs:
       build_mode:
@@ -23,25 +21,22 @@ on:
           - 正常编译
           - 仅编译机器 config.buildinfo
 
-  # API 触发
   repository_dispatch:
 
-  # 每天北京时间 02:00 自动编译
   schedule:
+    # 北京/新加坡时间每天 02:00
     - cron: "0 18 * * *"
 
-# 全局变量
 env:
   TZ: Asia/Shanghai
+
   REPO_URL: https://github.com/coolsnowwolf/lede
   REPO_BRANCH: master
 
-  # 配置文件
   PLATFORM_FILE: configs/Target-rockchip-L.txt
   PACKAGE_FILE: configs/Packages.txt
   MACHINE_CONFIG_FILE: configs/config.buildinfo
 
-  # 脚本
   FREE_DISK_SH: scripts/free_disk_space.sh
   ENV_SH: scripts/environment.sh
   DIY_P1_SH: scripts/diy-part1.sh
@@ -49,77 +44,89 @@ env:
 
 jobs:
   build:
-    name: LEDE Rockchip ARM64 H68K
+    name: 编译 LEDE Rockchip ARM64 H68K
     runs-on: ubuntu-latest
     timeout-minutes: 360
 
     steps:
 
-      # 获取配置仓库
-      - name: Checkout
+      - name: 检出配置仓库
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
-      # 确定编译模式
-      - name: Set build mode
+      - name: 确定编译模式
         run: |
+          set -e
+
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "BUILD_MODE=${{ github.event.inputs.build_mode }}" >> "$GITHUB_ENV"
           else
             echo "BUILD_MODE=正常编译" >> "$GITHUB_ENV"
           fi
 
-      # 初始化环境并清空工作目录
-      - name: Prepare environment
+      - name: 初始化编译环境
         run: |
           set -e
+
+          echo "========================================"
+          echo "初始化编译环境"
+          echo "========================================"
+
           sudo mkdir -p /workdir
           sudo chown -R "$(id -u):$(id -g)" /workdir
 
-          chmod +x "$GITHUB_WORKSPACE/$FREE_DISK_SH" \
-                   "$GITHUB_WORKSPACE/$ENV_SH"
+          chmod +x "$GITHUB_WORKSPACE/$FREE_DISK_SH"
+          chmod +x "$GITHUB_WORKSPACE/$ENV_SH"
 
           bash "$GITHUB_WORKSPACE/$FREE_DISK_SH"
           bash "$GITHUB_WORKSPACE/$ENV_SH"
 
-          # 清理 /workdir，不删除 Actions Cache
-          find /workdir -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+          find /workdir \
+            -mindepth 1 \
+            -maxdepth 1 \
+            -exec rm -rf {} +
 
-          rm -rf "$GITHUB_WORKSPACE/openwrt" \
-                 "$GITHUB_WORKSPACE/bin" \
-                 "$GITHUB_WORKSPACE/tmp" \
-                 "$GITHUB_WORKSPACE/logs"
+          rm -rf "$GITHUB_WORKSPACE/openwrt"
+          rm -rf "$GITHUB_WORKSPACE/bin"
+          rm -rf "$GITHUB_WORKSPACE/tmp"
+          rm -rf "$GITHUB_WORKSPACE/logs"
 
           echo "BUILD_DATE=$(date '+%Y-%m-%d %H:%M:%S')" >> "$GITHUB_ENV"
 
-      # 下载 LEDE
-      - name: Clone LEDE
+      - name: 下载 LEDE 源码
         run: |
           set -e
+
           cd /workdir
 
-          git clone "$REPO_URL" \
+          git clone \
+            "$REPO_URL" \
             --depth 1 \
             --single-branch \
             -b "$REPO_BRANCH" \
             openwrt
 
-          ln -s /workdir/openwrt "$GITHUB_WORKSPACE/openwrt"
+          ln -s /workdir/openwrt \
+            "$GITHUB_WORKSPACE/openwrt"
 
-          cd openwrt
-          echo "WRT_HASH=$(git log -1 --pretty=format:'%h')" >> "$GITHUB_ENV"
+          cd /workdir/openwrt
 
-      # DIY1：独立执行
-      - name: DIY Part 1
+          echo "WRT_HASH=$(git log -1 --pretty=format:'%h')" \
+            >> "$GITHUB_ENV"
+
+      - name: 执行自定义脚本一
         working-directory: /workdir/openwrt
         run: |
           set -e
+
+          test -f "$GITHUB_WORKSPACE/$DIY_P1_SH"
+
           chmod +x "$GITHUB_WORKSPACE/$DIY_P1_SH"
+
           bash "$GITHUB_WORKSPACE/$DIY_P1_SH"
 
-      # 恢复编译缓存
-      - name: Restore cache
+      - name: 恢复编译缓存
         uses: actions/cache@v4
         with:
           path: |
@@ -130,11 +137,13 @@ jobs:
           restore-keys: |
             rockchip-${{ env.REPO_BRANCH }}-
 
-      # 开启 CCACHE
-      - name: Enable ccache
+      - name: 启用编译缓存
         working-directory: /workdir/openwrt
         run: |
-          sed -i '/^CONFIG_DEVEL=/d;/^CONFIG_CCACHE=/d' \
+          set -e
+
+          sed -i \
+            '/^CONFIG_DEVEL=/d;/^CONFIG_CCACHE=/d' \
             .config 2>/dev/null || true
 
           cat >> .config <<'EOF'
@@ -142,129 +151,190 @@ jobs:
           CONFIG_CCACHE=y
           EOF
 
-      # 更新 / 安装 feeds
-      - name: Update feeds
-        working-directory: /workdir/openwrt
-        run: ./scripts/feeds update -a
-
-      - name: Install feeds
-        working-directory: /workdir/openwrt
-        run: ./scripts/feeds install -a
-
-      # 导入配置
-      - name: Import config
+      - name: 更新软件源
         working-directory: /workdir/openwrt
         run: |
           set -e
 
+          ./scripts/feeds update -a
+
+      - name: 安装软件源
+        working-directory: /workdir/openwrt
+        run: |
+          set -e
+
+          ./scripts/feeds install -a
+
+      - name: 导入编译配置
+        working-directory: /workdir/openwrt
+        run: |
+          set -e
+
+          echo "========================================"
+
           if [ "$BUILD_MODE" = "仅编译机器 config.buildinfo" ]; then
-            # 机器模式：只使用机器配置
+
+            echo "编译模式：仅编译机器 config.buildinfo"
+            echo "========================================"
+
             test -f "$GITHUB_WORKSPACE/$MACHINE_CONFIG_FILE"
+
             cat "$GITHUB_WORKSPACE/$MACHINE_CONFIG_FILE" >> .config
+
           else
-            # 正常模式：平台 + 软件包配置
+
+            echo "编译模式：正常编译"
+            echo "========================================"
+
             test -f "$GITHUB_WORKSPACE/$PLATFORM_FILE"
             test -f "$GITHUB_WORKSPACE/$PACKAGE_FILE"
 
             cat "$GITHUB_WORKSPACE/$PLATFORM_FILE" >> .config
             cat "$GITHUB_WORKSPACE/$PACKAGE_FILE" >> .config
+
           fi
 
-      # 应用自定义 files/
-      - name: Apply files
-        working-directory: /workdir/openwrt
-        run: |
-          [ ! -d "$GITHUB_WORKSPACE/files" ] || \
-          cp -a "$GITHUB_WORKSPACE/files/." .
+          echo "配置导入完成"
 
-      # DIY2：独立执行
-      - name: DIY Part 2
+      - name: 应用自定义文件
         working-directory: /workdir/openwrt
         run: |
           set -e
+
+          if [ -d "$GITHUB_WORKSPACE/files" ]; then
+            echo "发现 files/ 目录，开始复制"
+
+            cp -a \
+              "$GITHUB_WORKSPACE/files/." \
+              .
+
+            echo "files/ 应用完成"
+          else
+            echo "未发现 files/，跳过"
+          fi
+
+      - name: 执行自定义脚本二
+        working-directory: /workdir/openwrt
+        run: |
+          set -e
+
+          test -f "$GITHUB_WORKSPACE/$DIY_P2_SH"
+
           chmod +x "$GITHUB_WORKSPACE/$DIY_P2_SH"
+
           bash "$GITHUB_WORKSPACE/$DIY_P2_SH"
 
-      # 强制锁定 H68K
-      - name: Lock H68K
+          echo "DIY2 完成"
+
+      - name: 生成并验证最终配置
         working-directory: /workdir/openwrt
         run: |
           set -e
 
-          # 删除其他 Rockchip ARM64 设备
-          sed -i '/^CONFIG_TARGET_DEVICE_rockchip_armv8_DEVICE_/d' .config
+          echo "========================================"
+          echo "生成最终配置"
+          echo "========================================"
 
-          # 删除原 Target 配置
-          sed -i '/^CONFIG_TARGET_rockchip=/d;
-                  /^CONFIG_TARGET_rockchip_armv8=/d;
-                  /^CONFIG_TARGET_MULTI_PROFILE=/d' .config
-
-          # 只保留 Hinlink OPC-H68K
-          cat >> .config <<'EOF'
-          CONFIG_TARGET_rockchip=y
-          CONFIG_TARGET_rockchip_armv8=y
-          CONFIG_TARGET_MULTI_PROFILE=y
-          CONFIG_TARGET_DEVICE_rockchip_armv8_DEVICE_hinlink_opc-h68k=y
-          EOF
-
-      # 生成最终配置并验证唯一设备
-      - name: Make defconfig
-        working-directory: /workdir/openwrt
-        run: |
-          set -e
           make defconfig
 
-          COUNT=$(grep \
-            '^CONFIG_TARGET_DEVICE_rockchip_armv8_DEVICE_.*=y$' \
-            .config | wc -l)
+          echo ""
+          echo "========================================"
+          echo "验证 Hinlink OPC-H68K"
+          echo "========================================"
 
-          [ "$COUNT" -eq 1 ]
+          COUNT=$(
+            grep \
+              '^CONFIG_TARGET_DEVICE_rockchip_armv8_DEVICE_.*=y$' \
+              .config |
+            wc -l
+          )
+
+          echo "检测到 Rockchip ARM64 设备数量：$COUNT"
+
+          if [ "$COUNT" -ne 1 ]; then
+            echo "ERROR: Rockchip ARM64 目标设备不是唯一设备"
+            grep \
+              '^CONFIG_TARGET_DEVICE_rockchip_armv8_DEVICE_.*=y$' \
+              .config || true
+            exit 1
+          fi
 
           grep -q \
             '^CONFIG_TARGET_DEVICE_rockchip_armv8_DEVICE_hinlink_opc-h68k=y$' \
             .config
 
-      # 下载源码
-      - name: Download
-        working-directory: /workdir/openwrt
-        run: |
-          set -e
-          make download -j8 V=s
-          find dl -type f -size -1024c -delete || true
+          echo "H68K 目标验证通过"
 
-      # 正式编译
-      - name: Compile
+      - name: 下载编译依赖
         working-directory: /workdir/openwrt
         run: |
           set -e
+
+          make download -j8 V=s
+
+          find dl \
+            -type f \
+            -size -1024c \
+            -delete || true
+
+      - name: 开始正式编译
+        working-directory: /workdir/openwrt
+        run: |
+          set -e
+
           N=$(nproc)
 
-          # 并行失败后单线程详细重编
-          make -j$((N + 1)) || make -j1 V=s
+          echo "CPU 核心数：$N"
+          echo "开始并行编译..."
 
-      # 整理固件和配置
-      - name: Prepare firmware
+          make -j$((N + 1)) || {
+            echo "并行编译失败，切换单线程详细编译"
+            make -j1 V=s
+          }
+
+          echo "编译完成"
+
+      - name: 整理固件和编译配置
         working-directory: /workdir/openwrt
         run: |
           set -e
 
-          FIRMWARE_DIR=$(find bin/targets \
-            -mindepth 2 -maxdepth 2 -type d | head -n1)
+          echo "========================================"
+          echo "整理编译结果"
+          echo "========================================"
+
+          FIRMWARE_DIR=$(
+            find bin/targets \
+              -mindepth 2 \
+              -maxdepth 2 \
+              -type d |
+            head -n1
+          )
 
           test -n "$FIRMWARE_DIR"
+
+          echo "固件目录：$FIRMWARE_DIR"
+
           echo "FIRMWARE_DIR=$FIRMWARE_DIR" >> "$GITHUB_ENV"
 
-          # 确认固件生成成功
-          test -n "$(find "$FIRMWARE_DIR" \
-            -maxdepth 1 -type f -name '*.img.gz' -print -quit)"
+          test -n "$(
+            find "$FIRMWARE_DIR" \
+              -maxdepth 1 \
+              -type f \
+              -name '*.img.gz' \
+              -print \
+              -quit
+          )"
+
           test -f "$FIRMWARE_DIR/config.buildinfo"
 
-          # 保存完整配置
-          cp .config "$FIRMWARE_DIR/full.config.buildinfo"
+          cp \
+            .config \
+            "$FIRMWARE_DIR/full.config.buildinfo"
 
-          # 保存 H68K 关键配置
           {
             echo "# Hinlink OPC-H68K"
+
             grep '^CONFIG_TARGET_rockchip=' .config || true
             grep '^CONFIG_TARGET_rockchip_armv8=' .config || true
             grep '^CONFIG_TARGET_MULTI_PROFILE=' .config || true
@@ -272,16 +342,24 @@ jobs:
             grep '^CONFIG_TARGET_ROOTFS_' .config || true
             grep '^CONFIG_TARGET_ROOTFS_PARTSIZE=' .config || true
             grep '^CONFIG_PACKAGE_luci-app-cpufreq=' .config || true
+
           } > "$FIRMWARE_DIR/machine.config.buildinfo"
 
-          # 不上传 packages 目录
           rm -rf "$FIRMWARE_DIR/packages"
 
-      # 生成 Release 信息
-      - name: Release info
+          echo "固件整理完成"
+
+      - name: 生成发布信息
         run: |
-          TAG="$(date '+%Y.%m.%d-%H%M%S')-Rockchip-H68K-${GITHUB_RUN_NUMBER}"
-          NAME="Rockchip H68K $(date '+%Y-%m-%d %H:%M:%S')"
+          set -e
+
+          TAG="$(
+            date '+%Y.%m.%d-%H%M%S'
+          )-Rockchip-H68K-${GITHUB_RUN_NUMBER}"
+
+          NAME="$(
+            echo "Rockchip H68K $(date '+%Y-%m-%d %H:%M:%S')"
+          )"
 
           echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
           echo "RELEASE_NAME=$NAME" >> "$GITHUB_ENV"
@@ -295,11 +373,10 @@ jobs:
           - LEDE commit: $WRT_HASH
           - Build mode: $BUILD_MODE
           - Build time: $BUILD_DATE
-          - Run: $GITHUB_RUN_NUMBER
+          - GitHub Run: $GITHUB_RUN_NUMBER
           EOF
 
-      # 创建 Release 并上传固件
-      - name: Upload Release
+      - name: 发布固件到 GitHub
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
@@ -313,12 +390,15 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      # 只保留最新 3 个 H68K Release
-      - name: Cleanup old releases
+      - name: 清理旧版本并保留最新三个
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -e
+
+          echo "========================================"
+          echo "检查旧版本"
+          echo "========================================"
 
           gh release list \
             --repo "$GITHUB_REPOSITORY" \
@@ -337,20 +417,29 @@ jobs:
           sort -r |
           tail -n +4 |
           while IFS=$'\t' read -r DATE TAG; do
+
             [ -z "$TAG" ] && continue
+
+            echo "删除旧版本：$TAG"
+
             gh release delete "$TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --cleanup-tag \
               --yes
+
           done
 
-      # 编译摘要
-      - name: Summary
+          echo "仅保留最新三个 H68K Release"
+
+      - name: 编译完成摘要
         run: |
-          echo "================================"
-          echo "BUILD SUCCESS"
-          echo "Target : Hinlink OPC-H68K"
-          echo "Mode   : $BUILD_MODE"
-          echo "Commit : $WRT_HASH"
-          echo "Release: $RELEASE_TAG"
-          echo "================================"
+          echo "========================================"
+          echo "编译成功"
+          echo "========================================"
+          echo "设备 : Hinlink OPC-H68K"
+          echo "架构 : Rockchip ARM64"
+          echo "模式 : $BUILD_MODE"
+          echo "提交 : $WRT_HASH"
+          echo "发布 : $RELEASE_TAG"
+          echo "时间 : $BUILD_DATE"
+          echo "========================================"
