@@ -1,5 +1,3 @@
-# LEDE Rockchip ARM64 / Hinlink OPC-H68K
-
 name: rockchip
 
 permissions:
@@ -19,12 +17,11 @@ on:
         type: choice
         options:
           - 正常编译
-          - 仅编译机器 config.buildinfo
+          - 仅生成 config.buildinfo
 
   repository_dispatch:
 
   schedule:
-    # 北京/新加坡时间每天 02:00
     - cron: "0 18 * * *"
 
 env:
@@ -35,7 +32,6 @@ env:
 
   PLATFORM_FILE: configs/Target-rockchip-L.txt
   PACKAGE_FILE: configs/Packages.txt
-  MACHINE_CONFIG_FILE: configs/config.buildinfo
 
   FREE_DISK_SH: scripts/free_disk_space.sh
   ENV_SH: scripts/environment.sh
@@ -68,10 +64,6 @@ jobs:
       - name: 初始化编译环境
         run: |
           set -e
-
-          echo "========================================"
-          echo "初始化编译环境"
-          echo "========================================"
 
           sudo mkdir -p /workdir
           sudo chown -R "$(id -u):$(id -g)" /workdir
@@ -112,8 +104,7 @@ jobs:
 
           cd /workdir/openwrt
 
-          echo "WRT_HASH=$(git log -1 --pretty=format:'%h')" \
-            >> "$GITHUB_ENV"
+          echo "WRT_HASH=$(git log -1 --pretty=format:'%h')" >> "$GITHUB_ENV"
 
       - name: 执行自定义脚本一
         working-directory: /workdir/openwrt
@@ -121,10 +112,11 @@ jobs:
           set -e
 
           test -f "$GITHUB_WORKSPACE/$DIY_P1_SH"
-
           chmod +x "$GITHUB_WORKSPACE/$DIY_P1_SH"
 
           bash "$GITHUB_WORKSPACE/$DIY_P1_SH"
+
+          echo "DIY1 完成"
 
       - name: 恢复编译缓存
         uses: actions/cache@v4
@@ -155,59 +147,32 @@ jobs:
         working-directory: /workdir/openwrt
         run: |
           set -e
-
           ./scripts/feeds update -a
 
       - name: 安装软件源
         working-directory: /workdir/openwrt
         run: |
           set -e
-
           ./scripts/feeds install -a
 
-      - name: 导入编译配置
+      - name: 导入 H68K 和软件包配置
         working-directory: /workdir/openwrt
         run: |
           set -e
 
-          echo "========================================"
+          test -f "$GITHUB_WORKSPACE/$PLATFORM_FILE"
+          test -f "$GITHUB_WORKSPACE/$PACKAGE_FILE"
 
-          if [ "$BUILD_MODE" = "仅编译机器 config.buildinfo" ]; then
+          cat "$GITHUB_WORKSPACE/$PLATFORM_FILE" >> .config
+          cat "$GITHUB_WORKSPACE/$PACKAGE_FILE" >> .config
 
-            echo "编译模式：仅编译机器 config.buildinfo"
-            echo "========================================"
-
-            test -f "$GITHUB_WORKSPACE/$MACHINE_CONFIG_FILE"
-
-            cat "$GITHUB_WORKSPACE/$MACHINE_CONFIG_FILE" >> .config
-
-          else
-
-            echo "编译模式：正常编译"
-            echo "========================================"
-
-            test -f "$GITHUB_WORKSPACE/$PLATFORM_FILE"
-            test -f "$GITHUB_WORKSPACE/$PACKAGE_FILE"
-
-            cat "$GITHUB_WORKSPACE/$PLATFORM_FILE" >> .config
-            cat "$GITHUB_WORKSPACE/$PACKAGE_FILE" >> .config
-
-          fi
-
-          echo "配置导入完成"
-
-      - name: 应用自定义文件
+      - name: 应用 files
         working-directory: /workdir/openwrt
         run: |
           set -e
 
           if [ -d "$GITHUB_WORKSPACE/files" ]; then
-            echo "发现 files/ 目录，开始复制"
-
-            cp -a \
-              "$GITHUB_WORKSPACE/files/." \
-              .
-
+            cp -a "$GITHUB_WORKSPACE/files/." .
             echo "files/ 应用完成"
           else
             echo "未发现 files/，跳过"
@@ -219,7 +184,6 @@ jobs:
           set -e
 
           test -f "$GITHUB_WORKSPACE/$DIY_P2_SH"
-
           chmod +x "$GITHUB_WORKSPACE/$DIY_P2_SH"
 
           bash "$GITHUB_WORKSPACE/$DIY_P2_SH"
@@ -231,16 +195,9 @@ jobs:
         run: |
           set -e
 
-          echo "========================================"
-          echo "生成最终配置"
-          echo "========================================"
-
           make defconfig
 
-          echo ""
-          echo "========================================"
           echo "验证 Hinlink OPC-H68K"
-          echo "========================================"
 
           COUNT=$(
             grep \
@@ -253,9 +210,11 @@ jobs:
 
           if [ "$COUNT" -ne 1 ]; then
             echo "ERROR: Rockchip ARM64 目标设备不是唯一设备"
+
             grep \
               '^CONFIG_TARGET_DEVICE_rockchip_armv8_DEVICE_.*=y$' \
               .config || true
+
             exit 1
           fi
 
@@ -265,7 +224,99 @@ jobs:
 
           echo "H68K 目标验证通过"
 
+      - name: 生成 config.buildinfo
+        working-directory: /workdir/openwrt
+        run: |
+          set -e
+
+          rm -rf "$GITHUB_WORKSPACE/output"
+          mkdir -p "$GITHUB_WORKSPACE/output"
+
+          cp \
+            .config \
+            "$GITHUB_WORKSPACE/output/config.buildinfo"
+
+          cp \
+            .config \
+            "$GITHUB_WORKSPACE/output/full.config.buildinfo"
+
+          {
+            echo "# Hinlink OPC-H68K"
+            echo "# Generated: $BUILD_DATE"
+            echo "# LEDE commit: $WRT_HASH"
+            echo ""
+
+            grep '^CONFIG_TARGET_rockchip=' .config || true
+            grep '^CONFIG_TARGET_rockchip_armv8=' .config || true
+            grep '^CONFIG_TARGET_MULTI_PROFILE=' .config || true
+            grep '^CONFIG_TARGET_DEVICE_rockchip_armv8_DEVICE_' .config || true
+            grep '^CONFIG_TARGET_ROOTFS_' .config || true
+            grep '^CONFIG_TARGET_ROOTFS_PARTSIZE=' .config || true
+            grep '^CONFIG_PACKAGE_luci-app-cpufreq=' .config || true
+            grep '^CONFIG_CCACHE=' .config || true
+            grep '^CONFIG_DEVEL=' .config || true
+
+          } > "$GITHUB_WORKSPACE/output/machine.config.buildinfo"
+
+          ls -lh "$GITHUB_WORKSPACE/output"
+
+      - name: 发布 config.buildinfo
+        if: env.BUILD_MODE == '仅生成 config.buildinfo'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: config-H68K-${{ github.run_number }}
+          name: H68K config.buildinfo ${{ github.run_number }}
+          body: |
+            ## Hinlink OPC-H68K
+
+            本版本仅生成最终 config.buildinfo。
+
+            - Target: Hinlink OPC-H68K
+            - Architecture: Rockchip ARM64
+            - LEDE branch: ${{ env.REPO_BRANCH }}
+            - LEDE commit: ${{ env.WRT_HASH }}
+            - Build mode: 仅生成 config.buildinfo
+            - Build time: ${{ env.BUILD_DATE }}
+            - GitHub Run: ${{ github.run_number }}
+
+            配置生成流程：
+
+            LEDE master 默认配置
+            +
+            Target-rockchip-L.txt
+            +
+            Packages.txt
+            +
+            DIY1
+            +
+            DIY2
+            ↓
+            make defconfig
+            ↓
+            最终 .config
+            ↓
+            config.buildinfo
+          files: |
+            output/config.buildinfo
+            output/full.config.buildinfo
+            output/machine.config.buildinfo
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 配置模式完成
+        if: env.BUILD_MODE == '仅生成 config.buildinfo'
+        run: |
+          echo "========================================"
+          echo "config.buildinfo 生成完成"
+          echo "========================================"
+          echo "设备：Hinlink OPC-H68K"
+          echo "架构：Rockchip ARM64"
+          echo "LEDE：$WRT_HASH"
+          echo "模式：$BUILD_MODE"
+          echo "========================================"
+
       - name: 下载编译依赖
+        if: env.BUILD_MODE == '正常编译'
         working-directory: /workdir/openwrt
         run: |
           set -e
@@ -278,6 +329,7 @@ jobs:
             -delete || true
 
       - name: 开始正式编译
+        if: env.BUILD_MODE == '正常编译'
         working-directory: /workdir/openwrt
         run: |
           set -e
@@ -285,7 +337,6 @@ jobs:
           N=$(nproc)
 
           echo "CPU 核心数：$N"
-          echo "开始并行编译..."
 
           make -j$((N + 1)) || {
             echo "并行编译失败，切换单线程详细编译"
@@ -295,13 +346,10 @@ jobs:
           echo "编译完成"
 
       - name: 整理固件和编译配置
+        if: env.BUILD_MODE == '正常编译'
         working-directory: /workdir/openwrt
         run: |
           set -e
-
-          echo "========================================"
-          echo "整理编译结果"
-          echo "========================================"
 
           FIRMWARE_DIR=$(
             find bin/targets \
@@ -312,8 +360,6 @@ jobs:
           )
 
           test -n "$FIRMWARE_DIR"
-
-          echo "固件目录：$FIRMWARE_DIR"
 
           echo "FIRMWARE_DIR=$FIRMWARE_DIR" >> "$GITHUB_ENV"
 
@@ -332,24 +378,16 @@ jobs:
             .config \
             "$FIRMWARE_DIR/full.config.buildinfo"
 
-          {
-            echo "# Hinlink OPC-H68K"
-
-            grep '^CONFIG_TARGET_rockchip=' .config || true
-            grep '^CONFIG_TARGET_rockchip_armv8=' .config || true
-            grep '^CONFIG_TARGET_MULTI_PROFILE=' .config || true
-            grep '^CONFIG_TARGET_DEVICE_rockchip_armv8_DEVICE_' .config || true
-            grep '^CONFIG_TARGET_ROOTFS_' .config || true
-            grep '^CONFIG_TARGET_ROOTFS_PARTSIZE=' .config || true
-            grep '^CONFIG_PACKAGE_luci-app-cpufreq=' .config || true
-
-          } > "$FIRMWARE_DIR/machine.config.buildinfo"
+          cp \
+            "$GITHUB_WORKSPACE/output/machine.config.buildinfo" \
+            "$FIRMWARE_DIR/machine.config.buildinfo"
 
           rm -rf "$FIRMWARE_DIR/packages"
 
-          echo "固件整理完成"
+          ls -lh "$FIRMWARE_DIR"
 
       - name: 生成发布信息
+        if: env.BUILD_MODE == '正常编译'
         run: |
           set -e
 
@@ -374,9 +412,21 @@ jobs:
           - Build mode: $BUILD_MODE
           - Build time: $BUILD_DATE
           - GitHub Run: $GITHUB_RUN_NUMBER
+
+          ### Configuration
+
+          配置由以下内容生成：
+
+          - LEDE master 默认配置
+          - Target-rockchip-L.txt
+          - Packages.txt
+          - DIY1
+          - DIY2
+          - make defconfig
           EOF
 
       - name: 发布固件到 GitHub
+        if: env.BUILD_MODE == '正常编译'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
@@ -391,14 +441,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: 清理旧版本并保留最新三个
+        if: env.BUILD_MODE == '正常编译'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -e
-
-          echo "========================================"
-          echo "检查旧版本"
-          echo "========================================"
 
           gh release list \
             --repo "$GITHUB_REPOSITORY" \
@@ -429,9 +476,10 @@ jobs:
 
           done
 
-          echo "仅保留最新三个 H68K Release"
+          echo "仅保留最新三个 H68K 正式 Release"
 
       - name: 编译完成摘要
+        if: env.BUILD_MODE == '正常编译'
         run: |
           echo "========================================"
           echo "编译成功"
