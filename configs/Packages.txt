@@ -1,6 +1,62 @@
 #全量版插件（插件太多 容易编译失败，按需自己克隆修改）
 # 后面的y是编译..... n就是不编译
 
+
+# USB 3.0 高速以太网
+CONFIG_PACKAGE_kmod-usb-net-aqc111=y
+
+# USB 3.0 千兆
+CONFIG_PACKAGE_kmod-usb-net-asix-ax88179=y
+CONFIG_PACKAGE_kmod-usb-net-lan78xx=y
+CONFIG_PACKAGE_kmod-usb-net-smsc75xx=y
+
+# USB 网络共享
+CONFIG_PACKAGE_kmod-usb-net-rndis=y
+
+kmod-usb-net-cdc-mbim
+kmod-usb-net-qmi-wwan
+kmod-usb-net-huawei-cdc-ncm
+kmod-usb-net-hso
+kmod-usb-net-sierrawireless
+
+kmod-usb-wdm
+kmod-wwan
+kmod-mhi-bus
+kmod-mhi-net
+kmod-mhi-pci-generic
+kmod-mhi-wwan-ctrl
+kmod-mhi-wwan-mbim
+
+
+
+
+# MediaTek
+CONFIG_PACKAGE_kmod-mt76x0u=y
+CONFIG_PACKAGE_kmod-mt76x2u=y
+CONFIG_PACKAGE_kmod-mt7663u=y
+CONFIG_PACKAGE_kmod-mt7921u=y
+CONFIG_PACKAGE_kmod-mt7925u=y
+
+# Realtek Wi-Fi 5
+CONFIG_PACKAGE_kmod-rtw88-8812au=y
+CONFIG_PACKAGE_kmod-rtw88-8821au=y
+CONFIG_PACKAGE_kmod-rtw88-8814au=y
+CONFIG_PACKAGE_kmod-rtw88-8821cu=y
+CONFIG_PACKAGE_kmod-rtw88-8822bu=y
+CONFIG_PACKAGE_kmod-rtw88-8822cu=y
+
+# Broadcom USB
+CONFIG_PACKAGE_kmod-brcmfmac=y
+
+
+
+
+
+
+
+
+
+
 # 主题调整
 CONFIG_PACKAGE_luci-theme-design=y
 
