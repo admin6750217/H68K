@@ -1,8 +1,7 @@
 #!/bin/bash
 
-#更改默认地址为192.168.8.1
+mkdir -p files/etc/sysctl.d
 
-# 给config下的文件增加权限
-chmod 644 files/etc/config/*
-
-
+cat > files/etc/sysctl.d/99-conntrack.conf <<'EOF'
+net.netfilter.nf_conntrack_max=655000
+EOF
