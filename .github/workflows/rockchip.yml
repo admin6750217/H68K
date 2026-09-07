@@ -22,7 +22,6 @@ on:
     - cron: "0 12 * * 3"
 
 env:
-
   # ==========================================================
   # 时区
   # ==========================================================
@@ -59,24 +58,18 @@ env:
   UPLOAD_BIN_DIR: false
   UPLOAD_FIRMWARE: true
 
-
 jobs:
-
   build:
-
     name: LEDE Rockchip ARM64
-
     runs-on: ubuntu-24.04
 
     steps:
-
       # ======================================================
       # 1. 检出配置仓库
       # ======================================================
 
       - name: 检查代码
         uses: actions/checkout@v4
-
 
       # ======================================================
       # 2. 初始化环境
@@ -86,9 +79,7 @@ jobs:
         shell: bash
         env:
           DEBIAN_FRONTEND: noninteractive
-
         run: |
-
           set -e
 
           echo "=========================================="
@@ -124,31 +115,23 @@ jobs:
           echo "当前时间："
           date
 
-
       # ======================================================
       # 3. 查看磁盘
       # ======================================================
 
       - name: 编译前空间
         if: (!cancelled())
-
         run: |
-
           df -hT
-
 
       # ======================================================
       # 4. 克隆 LEDE
       # ======================================================
 
       - name: 克隆 LEDE 源码
-
         working-directory: /workdir
-
         shell: bash
-
         run: |
-
           set -e
 
           echo "=========================================="
@@ -186,26 +169,20 @@ jobs:
           PROJECT_MIRRORS_FILE="scripts/projectsmirrors.json"
 
           if [ -f "$PROJECT_MIRRORS_FILE" ]; then
-
             sed -i \
               -e '/\.cn\//d' \
               -e '/tencent/d' \
               -e '/aliyun/d' \
               "$PROJECT_MIRRORS_FILE" || true
-
           fi
-
 
       # ======================================================
       # 5. DIY Part 1
       # ======================================================
 
       - name: 执行 DIY Part 1
-
         shell: bash
-
         run: |
-
           set -e
 
           echo "=========================================="
@@ -213,64 +190,47 @@ jobs:
           echo "=========================================="
 
           chmod +x "$DIY_P1_SH"
-
           "$DIY_P1_SH"
-
 
       # ======================================================
       # 6. CCACHE
       # ======================================================
 
       - name: 恢复编译缓存
-
         id: check-cache
-
         uses: actions/cache@v4
-
         with:
-
           key: lede-rockchip-${{ env.REPO_BRANCH }}-${{ env.WRT_HASH }}
-
           restore-keys: |
             lede-rockchip-${{ env.REPO_BRANCH }}-
             lede-rockchip-
-
           path: |
             openwrt/.ccache
             openwrt/staging_dir/host*
             openwrt/staging_dir/tool*
-
 
       # ======================================================
       # 7. 开启 CCACHE
       # ======================================================
 
       - name: 开启 CCACHE
-
         shell: bash
-
         run: |
-
           set -e
 
           echo "CONFIG_DEVEL=y" >> openwrt/.config
           echo "CONFIG_CCACHE=y" >> openwrt/.config
-
 
       # ======================================================
       # 8. 恢复缓存环境
       # ======================================================
 
       - name: 修复缓存环境
-
         shell: bash
-
         run: |
-
           set -e
 
           if [ -d "openwrt/staging_dir" ]; then
-
             echo "发现 staging_dir"
 
             find openwrt/staging_dir \
@@ -279,11 +239,9 @@ jobs:
               -not -path "*target*" \
               -print0 |
             while IFS= read -r -d '' DIR; do
-
               find "$DIR" \
                 -type f \
                 -exec touch {} +
-
             done
 
             mkdir -p openwrt/tmp
@@ -291,24 +249,17 @@ jobs:
             echo "1" > openwrt/tmp/.build
 
             echo "缓存恢复完成"
-
           else
-
             echo "没有发现 staging_dir"
-
           fi
-
 
       # ======================================================
       # 9. 更新 feeds
       # ======================================================
 
       - name: 更新 feeds
-
         shell: bash
-
         run: |
-
           set -e
 
           cd openwrt
@@ -318,20 +269,15 @@ jobs:
           echo "=========================================="
 
           ./scripts/feeds update -a
-
           ./scripts/feeds install -a
-
 
       # ======================================================
       # 10. DIY Part 2
       # ======================================================
 
       - name: 执行 DIY Part 2
-
         shell: bash
-
         run: |
-
           set -e
 
           echo "=========================================="
@@ -339,20 +285,15 @@ jobs:
           echo "=========================================="
 
           chmod +x "$DIY_P2_SH"
-
           "$DIY_P2_SH"
-
 
       # ======================================================
       # 11. 检查配置文件
       # ======================================================
 
       - name: 检查编译配置
-
         shell: bash
-
         run: |
-
           set -e
 
           echo "=========================================="
@@ -370,17 +311,13 @@ jobs:
           echo "Packages 配置："
           cat "$CONFIG_FILE"
 
-
       # ======================================================
       # 12. 生成最终 .config
       # ======================================================
 
       - name: 生成最终配置
-
         shell: bash
-
         run: |
-
           set -e
 
           cd openwrt
@@ -402,17 +339,13 @@ jobs:
           grep '^CONFIG_PACKAGE_' .config \
             | head -100 || true
 
-
       # ======================================================
       # 13. 下载源码包
       # ======================================================
 
       - name: 下载编译依赖
-
         shell: bash
-
         run: |
-
           set -e
 
           cd openwrt
@@ -436,32 +369,23 @@ jobs:
             -size -1024c \
             -delete
 
-
       # ======================================================
       # 14. 编译前空间
       # ======================================================
 
       - name: 编译前空间检查
-
         if: (!cancelled())
-
         run: |
-
           df -hT
-
 
       # ======================================================
       # 15. 开始编译
       # ======================================================
 
       - name: 编译固件
-
         id: compile
-
         shell: bash
-
         run: |
-
           set -e
 
           cd openwrt
@@ -484,7 +408,6 @@ jobs:
           # ==================================================
 
           if ! make -j$((THREADS + 1)); then
-
             echo
             echo "=========================================="
             echo "多线程编译失败"
@@ -493,60 +416,43 @@ jobs:
             echo
 
             make -j1 V=s
-
           fi
 
           echo "status=success" >> "$GITHUB_OUTPUT"
-
 
       # ======================================================
       # 16. 编译后空间
       # ======================================================
 
       - name: 编译后空间检查
-
         if: (!cancelled())
-
         run: |
-
           df -hT
-
 
       # ======================================================
       # 17. 上传完整 bin
       # ======================================================
 
       - name: 上传 bin 目录
-
         if: >
           steps.compile.outputs.status == 'success'
           && env.UPLOAD_BIN_DIR == 'true'
-
         uses: actions/upload-artifact@v4
-
         with:
-
           name: LEDE_bin_${{ env.BUILD_DATE }}
-
           path: openwrt/bin
-
 
       # ======================================================
       # 18. 整理固件
       # ======================================================
 
       - name: 整理固件
-
         id: organize
-
         if: >
           steps.compile.outputs.status == 'success'
           && !cancelled()
-
         shell: bash
-
         run: |
-
           set -e
 
           cd openwrt/bin/targets/*/*
@@ -574,19 +480,14 @@ jobs:
 
           ls -lah
 
-
       # ======================================================
       # 19. Rockchip 固件重命名
       # ======================================================
 
       - name: 固件重命名
-
         if: steps.organize.outputs.status == 'success'
-
         shell: bash
-
         run: |
-
           set -e
 
           cd "$FIRMWARE"
@@ -594,63 +495,46 @@ jobs:
           shopt -s nullglob
 
           for file in *rockchip-armv8-*.gz; do
-
             new_name="${file#rockchip-armv8-}"
 
             if [ "$file" != "$new_name" ]; then
-
               echo "$file"
               echo " -> "
               echo "$new_name"
 
               mv -v "$file" "$new_name"
-
             fi
-
           done
-
 
       # ======================================================
       # 20. 上传 Artifact
       # ======================================================
 
       - name: 上传固件
-
         if: >
           env.UPLOAD_FIRMWARE == 'true'
           && steps.organize.outputs.status == 'success'
-
         uses: actions/upload-artifact@v4
-
         with:
-
           name: LEDE_Rockchip_${{ env.BUILD_DATE }}
-
           path: ${{ env.FIRMWARE }}
-
 
       # ======================================================
       # 21. 生成 Release
       # ======================================================
 
       - name: 生成 Release
-
         id: tag
-
         if: >
           steps.compile.outputs.status == 'success'
           && !cancelled()
-
         shell: bash
-
         run: |
-
           set -e
 
           RELEASE_TAG="LEDE-${WRT_HASH}-$(date '+%Y%m%d-%H%M')"
 
           echo "release_tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
-
           echo "status=success" >> "$GITHUB_OUTPUT"
 
           cat > release.txt << EOF
@@ -689,28 +573,19 @@ EOF
           echo
           cat release.txt
 
-
       # ======================================================
       # 22. 发布 GitHub Release
       # ======================================================
 
       - name: 发布固件
-
         if: >
           steps.tag.outputs.status == 'success'
           && !cancelled()
-
         uses: softprops/action-gh-release@v2
-
         with:
-
           tag_name: ${{ steps.tag.outputs.release_tag }}
-
           name: LEDE Rockchip ${{ env.BUILD_DATE }}
-
           body_path: release.txt
-
           files: |
             ${{ env.FIRMWARE }}/*
-
           overwrite_files: true
