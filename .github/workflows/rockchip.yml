@@ -14,10 +14,20 @@ permissions: write-all
 
 on:
   repository_dispatch:
+
   workflow_dispatch:
+    inputs:
+      build_mode:
+        description: "编译模式"
+        required: true
+        default: "正常编译"
+        type: choice
+        options:
+          - 正常编译
+          - 仅编译机器 config.buildinfo
+
   schedule:
     # 每周三北京时间 20:00
-    # 北京时间 UTC+8
     # GitHub Actions 使用 UTC
     - cron: "0 12 * * 3"
 
@@ -39,6 +49,7 @@ env:
   # ==========================================================
   PLATFORM_FILE: configs/Target-rockchip-L.txt
   CONFIG_FILE: configs/Packages.txt
+  MACHINE_CONFIG_FILE: configs/config.buildinfo
 
   # ==========================================================
   # 自定义脚本
@@ -51,13 +62,12 @@ env:
   # ==========================================================
   # 上传设置
   # ==========================================================
-  # 不上传 Artifact
   UPLOAD_BIN_DIR: false
   UPLOAD_FIRMWARE: false
 
 jobs:
   build:
-    name: LEDE Rockchip ARM64
+    name: LEDE Rockchip ARM64 H68K
     runs-on: ubuntu-latest
 
     steps:
@@ -87,29 +97,25 @@ jobs:
           chmod +x "$DIY_P1_SH"
           chmod +x "$DIY_P2_SH"
 
-          # 清理磁盘
           "$FREE_DISK_SH"
-
-          # 安装编译依赖
           "$ENV_SH"
 
-          # 清理 GitHub Actions 默认源
           sudo rm -rf /etc/apt/sources.list.d/*
           sudo rm -rf /var/lib/apt/lists/*
 
-          # 设置时区
           sudo timedatectl set-timezone "$TZ"
 
-          # 创建工作目录
           sudo mkdir -p /workdir
           sudo chown "$USER:$GROUPS" /workdir
 
-          # 保存编译时间
           echo "BUILD_DATE=$(date '+%Y%m%d-%H%M%S')" >> "$GITHUB_ENV"
 
           echo
           echo "当前时间："
           date
+
+          echo
+          echo "编译模式：${{ github.event.inputs.build_mode || '正常编译' }}"
 
       # ======================================================
       # 3. 检查磁盘空间
@@ -139,14 +145,12 @@ jobs:
             -b "$REPO_BRANCH" \
             openwrt
 
-          # 建立软链接
           ln -sf \
             /workdir/openwrt \
             "$GITHUB_WORKSPACE/openwrt"
 
           cd /workdir/openwrt
 
-          # 获取源码 Commit
           WRT_HASH=$(git log -1 --pretty=format:'%h')
 
           echo "WRT_HASH=$WRT_HASH" >> "$GITHUB_ENV"
@@ -156,9 +160,6 @@ jobs:
           echo "分支：$REPO_BRANCH"
           echo "Commit：$WRT_HASH"
 
-          # ==================================================
-          # GitHub Actions 移除部分国内镜像
-          # ==================================================
           PROJECT_MIRRORS_FILE="./scripts/projectsmirrors.json"
 
           if [ -f "$PROJECT_MIRRORS_FILE" ]; then
@@ -177,15 +178,11 @@ jobs:
         run: |
           set -e
 
-          echo "=========================================="
-          echo "执行 DIY Part 1"
-          echo "=========================================="
-
           chmod +x "$DIY_P1_SH"
           "$DIY_P1_SH"
 
       # ======================================================
-      # 6. 检查 CCACHE
+      # 6. CCACHE
       # ======================================================
       - name: 检查缓存
         id: check-cache
@@ -211,7 +208,7 @@ jobs:
           echo "CONFIG_CCACHE=y" >> openwrt/.config
 
       # ======================================================
-      # 8. 更新缓存环境
+      # 8. 更新缓存
       # ======================================================
       - name: 更新缓存
         shell: bash
@@ -219,8 +216,6 @@ jobs:
           set -e
 
           if [ -d "./openwrt/staging_dir" ]; then
-
-            echo "发现缓存 staging_dir"
 
             find "./openwrt/staging_dir" \
               -type d \
@@ -240,7 +235,6 @@ jobs:
           else
 
             echo "没有发现 staging_dir"
-            echo "首次编译或缓存不存在"
 
           fi
 
@@ -254,80 +248,122 @@ jobs:
 
           cd openwrt
 
-          echo "=========================================="
-          echo "更新 feeds"
-          echo "=========================================="
-
           ./scripts/feeds update -a
           ./scripts/feeds install -a
 
       # ======================================================
-      # 10. 导入配置 + DIY Part 2
+      # 10. 导入配置
       # ======================================================
-      - name: 导入配置并执行 DIY Part 2
+      - name: 导入编译配置
         shell: bash
         run: |
           set -e
 
+          cd "$GITHUB_WORKSPACE"
+
+          BUILD_MODE="${{ github.event.inputs.build_mode || '正常编译' }}"
+
           echo "=========================================="
-          echo "导入编译配置"
+          echo "当前编译模式：$BUILD_MODE"
           echo "=========================================="
 
-          # --------------------------------------------------
-          # 检查 Target 配置
-          # --------------------------------------------------
-          if [ ! -f "$GITHUB_WORKSPACE/$PLATFORM_FILE" ]; then
-            echo "错误：找不到 $PLATFORM_FILE"
+          # ==================================================
+          # 正常编译
+          # ==================================================
+          if [ "$BUILD_MODE" = "正常编译" ]; then
+
+            echo
+            echo "========== 正常编译 =========="
+
+            if [ ! -f "$PLATFORM_FILE" ]; then
+              echo "❌ 找不到：$PLATFORM_FILE"
+              exit 1
+            fi
+
+            if [ ! -f "$CONFIG_FILE" ]; then
+              echo "❌ 找不到：$CONFIG_FILE"
+              exit 1
+            fi
+
+            echo
+            echo "========== Target =========="
+
+            cat "$PLATFORM_FILE"
+
+            cat "$PLATFORM_FILE" >> openwrt/.config
+
+            echo
+            echo "========== Packages =========="
+
+            cat "$CONFIG_FILE"
+
+            cat "$CONFIG_FILE" >> openwrt/.config
+
+          # ==================================================
+          # 仅编译机器 config.buildinfo
+          # ==================================================
+          elif [ "$BUILD_MODE" = "仅编译机器 config.buildinfo" ]; then
+
+            echo
+            echo "=========================================="
+            echo "仅编译机器 config.buildinfo"
+            echo "=========================================="
+
+            if [ ! -f "$MACHINE_CONFIG_FILE" ]; then
+              echo
+              echo "❌ 找不到机器配置："
+              echo "$MACHINE_CONFIG_FILE"
+              exit 1
+            fi
+
+            echo
+            echo "========== 机器 config.buildinfo =========="
+
+            cat "$MACHINE_CONFIG_FILE"
+
+            echo
+            echo "导入机器配置..."
+
+            cat "$MACHINE_CONFIG_FILE" >> openwrt/.config
+
+          else
+
+            echo "❌ 未知编译模式：$BUILD_MODE"
             exit 1
+
           fi
 
-          # --------------------------------------------------
-          # 检查 Packages 配置
-          # --------------------------------------------------
-          if [ ! -f "$GITHUB_WORKSPACE/$CONFIG_FILE" ]; then
-            echo "错误：找不到 $CONFIG_FILE"
-            exit 1
-          fi
-
-          # --------------------------------------------------
-          # 导入 Target
-          # --------------------------------------------------
+          # ==================================================
+          # 强制仅编译 H68K
+          # ==================================================
           echo
-          echo "========== Target =========="
+          echo "=========================================="
+          echo "锁定设备：Hinlink OPC-H68K"
+          echo "=========================================="
 
-          cat "$GITHUB_WORKSPACE/$PLATFORM_FILE"
+          {
+            echo "CONFIG_TARGET_rockchip=y"
+            echo "CONFIG_TARGET_rockchip_armv8=y"
+            echo "CONFIG_TARGET_MULTI_PROFILE=y"
+            echo "CONFIG_TARGET_DEVICE_rockchip_armv8_DEVICE_hinlink_opc-h68k=y"
+          } >> openwrt/.config
 
-          cat "$GITHUB_WORKSPACE/$PLATFORM_FILE" \
-            >> openwrt/.config
-
-          # --------------------------------------------------
-          # 导入 Packages
-          # --------------------------------------------------
-          echo
-          echo "========== Packages =========="
-
-          cat "$GITHUB_WORKSPACE/$CONFIG_FILE"
-
-          cat "$GITHUB_WORKSPACE/$CONFIG_FILE" \
-            >> openwrt/.config
-
-          # --------------------------------------------------
-          # 复制自定义 files
-          # --------------------------------------------------
+          # ==================================================
+          # 自定义 files
+          # ==================================================
           if [ -d "$GITHUB_WORKSPACE/files" ]; then
+
             echo
             echo "复制自定义 files"
 
             rm -rf openwrt/files
             cp -rf "$GITHUB_WORKSPACE/files" openwrt/files
-          else
-            echo
-            echo "没有 files 目录，跳过"
+
           fi
 
-          # --------------------------------------------------
-          # 执行 DIY Part 2
-          # --------------------------------------------------
+          # ==================================================
+          # DIY Part 2
+          # ==================================================
           echo
           echo "=========================================="
           echo "执行 DIY Part 2"
@@ -337,7 +373,7 @@ jobs:
           "$DIY_P2_SH"
 
       # ======================================================
-      # 11. 检查最终配置
+      # 11. 检查配置
       # ======================================================
       - name: 检查编译配置
         shell: bash
@@ -347,20 +383,27 @@ jobs:
           cd openwrt
 
           echo "=========================================="
-          echo "检查 Target 配置"
+          echo "Target 配置"
           echo "=========================================="
 
           grep '^CONFIG_TARGET' .config || true
 
           echo
           echo "=========================================="
-          echo "检查 Packages 配置"
+          echo "设备配置"
+          echo "=========================================="
+
+          grep '^CONFIG_TARGET_DEVICE_' .config || true
+
+          echo
+          echo "=========================================="
+          echo "Packages"
           echo "=========================================="
 
           grep '^CONFIG_PACKAGE_' .config | head -100 || true
 
       # ======================================================
-      # 12. 下载源码包
+      # 12. 下载文件
       # ======================================================
       - name: 下载文件
         shell: bash
@@ -370,10 +413,17 @@ jobs:
           cd openwrt
 
           echo "=========================================="
-          echo "生成默认配置"
+          echo "生成最终配置"
           echo "=========================================="
 
           make defconfig
+
+          echo
+          echo "=========================================="
+          echo "最终设备"
+          echo "=========================================="
+
+          grep '^CONFIG_TARGET_DEVICE_' .config || true
 
           echo
           echo "=========================================="
@@ -381,9 +431,6 @@ jobs:
           echo "=========================================="
 
           make download -j8 V=s
-
-          echo
-          echo "检查异常文件："
 
           find dl \
             -type f \
@@ -404,7 +451,7 @@ jobs:
           df -hT
 
       # ======================================================
-      # 14. 开始编译
+      # 14. 编译固件
       # ======================================================
       - name: 编译固件
         id: compile
@@ -414,11 +461,14 @@ jobs:
 
           cd openwrt
 
+          make defconfig
+
+          echo
           echo "=========================================="
-          echo "生成最终配置"
+          echo "最终确认设备"
           echo "=========================================="
 
-          make defconfig
+          grep '^CONFIG_TARGET_DEVICE_' .config || true
 
           echo
           echo "=========================================="
@@ -427,14 +477,9 @@ jobs:
 
           THREADS="$(nproc)"
 
-          echo
           echo "CPU 线程：$THREADS"
           echo "LEDE Commit：$WRT_HASH"
-          echo
 
-          # --------------------------------------------------
-          # 多线程编译
-          # --------------------------------------------------
           if ! make -j$((THREADS + 1)); then
 
             echo
@@ -442,9 +487,9 @@ jobs:
             echo "多线程编译失败"
             echo "开始单线程详细编译"
             echo "=========================================="
-            echo
 
             make -j1 V=s
+
           fi
 
           echo "status=success" >> "$GITHUB_OUTPUT"
@@ -477,25 +522,27 @@ jobs:
 
           # 删除无用文件
           rm -rf *.bin
-          rm -rf *.buildinfo
           rm -rf *.json
           rm -rf *.manifest
+
+          # 注意：
+          # 不删除 *.buildinfo
+          # 必须保留 config.buildinfo
 
           # 删除 packages
           rm -rf packages
 
-          # 保存固件目录
           echo "FIRMWARE=$PWD" >> "$GITHUB_ENV"
 
           echo "status=success" >> "$GITHUB_OUTPUT"
 
           echo
-          echo "========== 固件列表 =========="
+          echo "========== 固件目录 =========="
 
           ls -lah
 
       # ======================================================
-      # 17. Rockchip 固件重命名
+      # 17. 固件重命名
       # ======================================================
       - name: 固件重命名
         if: >
@@ -514,10 +561,7 @@ jobs:
             new_name="${file#rockchip-armv8-}"
 
             if [ "$file" != "$new_name" ]; then
-              echo "重命名："
-              echo "  $file"
-              echo "  -> $new_name"
-
+              echo "重命名：$file -> $new_name"
               mv -v "$file" "$new_name"
             fi
 
@@ -529,7 +573,104 @@ jobs:
           ls -lah
 
       # ======================================================
-      # 18. 生成 Release 标签
+      # 18. 生成机器配置
+      # ======================================================
+      - name: 生成机器配置
+        id: config
+        if: >
+          steps.organize.outputs.status == 'success'
+          && !cancelled()
+        shell: bash
+        run: |
+          set -e
+
+          cd "$GITHUB_WORKSPACE/openwrt"
+
+          echo "=========================================="
+          echo "检查 config.buildinfo"
+          echo "=========================================="
+
+          if [ ! -f "$FIRMWARE/config.buildinfo" ]; then
+
+            echo "❌ 未找到 config.buildinfo"
+
+            echo
+            echo "搜索："
+
+            find "$GITHUB_WORKSPACE/openwrt/bin/targets" \
+              -name "config.buildinfo" \
+              -type f \
+              -print || true
+
+            exit 1
+
+          fi
+
+          echo
+          echo "✅ 找到 config.buildinfo"
+
+          # ==================================================
+          # 生成仅机器配置
+          # ==================================================
+          MACHINE_OUTPUT="$FIRMWARE/machine.config.buildinfo"
+
+          echo
+          echo "=========================================="
+          echo "生成 machine.config.buildinfo"
+          echo "=========================================="
+
+          {
+            echo "# =================================================="
+            echo "# LEDE Rockchip ARM64"
+            echo "# Machine Configuration"
+            echo "# Device: Hinlink OPC-H68K"
+            echo "# Generated: $(date '+%Y-%m-%d %H:%M:%S')"
+            echo "# =================================================="
+            echo
+
+            echo "# Target"
+            grep '^CONFIG_TARGET_rockchip=' .config || true
+            grep '^CONFIG_TARGET_rockchip_armv8=' .config || true
+            grep '^CONFIG_TARGET_MULTI_PROFILE=' .config || true
+
+            echo
+            echo "# Device"
+            grep '^CONFIG_TARGET_DEVICE_rockchip_armv8_DEVICE_' .config || true
+
+            echo
+            echo "# RootFS"
+            grep '^CONFIG_TARGET_ROOTFS_' .config || true
+
+            echo
+            echo "# Kernel"
+            grep '^CONFIG_TARGET_KERNEL_' .config || true
+
+            echo
+            echo "# Images"
+            grep '^CONFIG_TARGET_IMAGES_' .config || true
+
+            echo
+            echo "# CPU Frequency"
+            grep '^CONFIG_PACKAGE_luci-app-cpufreq=' .config || true
+
+          } > "$MACHINE_OUTPUT"
+
+          # ==================================================
+          # 保存完整最终 .config
+          # ==================================================
+          cp .config "$FIRMWARE/full.config.buildinfo"
+
+          echo
+          echo "=========================================="
+          echo "配置文件"
+          echo "=========================================="
+
+          ls -lh "$FIRMWARE"/*.buildinfo
+
+          echo "status=success" >> "$GITHUB_OUTPUT"
+
+      # ======================================================
+      # 19. 生成 Release
       # ======================================================
       - name: 生成发布标签
         id: tag
@@ -540,12 +681,22 @@ jobs:
         run: |
           set -e
 
-          echo "🎉 LEDE Rockchip ARM64" >> release.txt
-          echo "✅ 主线源码" >> release.txt
-          echo "🍃 Rockchip 平台" >> release.txt
-          echo "❗️ 默认 IP：192.168.8.1" >> release.txt
+          BUILD_MODE="${{ github.event.inputs.build_mode || '正常编译' }}"
 
-          RELEASE_TAG="$(date '+%Y.%m.%d_Rockchip')"
+          echo "🎉 LEDE Rockchip ARM64" > release.txt
+          echo "🍃 Rockchip ARM64" >> release.txt
+          echo "📦 设备：Hinlink OPC-H68K" >> release.txt
+          echo "🧩 编译模式：$BUILD_MODE" >> release.txt
+          echo "🌿 分支：$REPO_BRANCH" >> release.txt
+          echo "🔖 Commit：$WRT_HASH" >> release.txt
+          echo "🕒 编译时间：$BUILD_DATE" >> release.txt
+          echo "❗️ 默认 IP：192.168.8.1" >> release.txt
+          echo "" >> release.txt
+          echo "config.buildinfo：本次实际编译配置" >> release.txt
+          echo "machine.config.buildinfo：H68K 机器配置" >> release.txt
+          echo "full.config.buildinfo：完整最终 .config" >> release.txt
+
+          RELEASE_TAG="$(date '+%Y.%m.%d_Rockchip-H68K')"
 
           echo "release_tag=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
           echo "status=success" >> "$GITHUB_OUTPUT"
@@ -554,16 +705,23 @@ jobs:
           echo "Release Tag：$RELEASE_TAG"
 
       # ======================================================
-      # 19. 上传固件到 GitHub Release
+      # 20. 上传 GitHub Release
       # ======================================================
       - name: 上传固件到发布
         uses: softprops/action-gh-release@v2
         if: >
           steps.tag.outputs.status == 'success'
+          && steps.config.outputs.status == 'success'
           && !cancelled()
         with:
           tag_name: ${{ steps.tag.outputs.release_tag }}
-          name: LEDE Rockchip ${{ env.BUILD_DATE }}
+          name: LEDE Rockchip H68K ${{ env.BUILD_DATE }}
           body_path: release.txt
-          files: ${{ env.FIRMWARE }}/*
+
+          files: |
+            ${{ env.FIRMWARE }}/*.gz
+            ${{ env.FIRMWARE }}/config.buildinfo
+            ${{ env.FIRMWARE }}/machine.config.buildinfo
+            ${{ env.FIRMWARE }}/full.config.buildinfo
+
           overwrite_files: true
