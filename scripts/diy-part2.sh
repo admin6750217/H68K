@@ -7,7 +7,6 @@ echo "===== DIY Part2 ====="
 echo "编译前配置处理完成"
 
 
-
 # 删除feeds中的插件
 rm -rf ./feeds/packages/net/{geoview,chinadns-ng,hysteria,mosdns,v2ray-geodata,lucky}
 rm -rf ./feeds/packages/net/{shadowsocks-libev,shadowsocks-rust,shadowsocksr-libev}
