@@ -121,10 +121,7 @@ jobs:
       - name: 恢复编译缓存
         uses: actions/cache@v4
         with:
-          path: |
-            /workdir/openwrt/.ccache
-            /workdir/openwrt/staging_dir/host*
-            /workdir/openwrt/staging_dir/tool*
+          path: /workdir/openwrt/.ccache
           key: rockchip-${{ env.REPO_BRANCH }}-${{ env.WRT_HASH }}
           restore-keys: |
             rockchip-${{ env.REPO_BRANCH }}-
@@ -147,12 +144,14 @@ jobs:
         working-directory: /workdir/openwrt
         run: |
           set -e
+
           ./scripts/feeds update -a
 
       - name: 安装软件源
         working-directory: /workdir/openwrt
         run: |
           set -e
+
           ./scripts/feeds install -a
 
       - name: 导入 H68K 和软件包配置
@@ -281,7 +280,9 @@ jobs:
 
             配置生成流程：
 
-            LEDE master 默认配置
+            LEDE 默认配置
+            +
+            仓库 feeds.conf
             +
             Target-rockchip-L.txt
             +
@@ -417,7 +418,8 @@ jobs:
 
           配置由以下内容生成：
 
-          - LEDE master 默认配置
+          - LEDE 默认配置
+          - 仓库 feeds.conf
           - Target-rockchip-L.txt
           - Packages.txt
           - DIY1
