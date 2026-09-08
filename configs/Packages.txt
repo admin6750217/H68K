@@ -7,7 +7,7 @@ CONFIG_PACKAGE_luci-app-passwall=y
 # CONFIG_PACKAGE_luci-app-passwall2 is not set
 # CONFIG_PACKAGE_luci-app-nikki is not set
 # CONFIG_PACKAGE_luci-app-momo is not set
-# CONFIG_PACKAGE_luci-app-daed is not set
+# CONFIG_PACKAGE_luci-app-ssr-plus is not set
 
 # 1.4 DNS
 CONFIG_PACKAGE_luci-app-mosdns=y
