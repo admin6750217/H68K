@@ -6,6 +6,7 @@ CONFIG_TARGET_MULTI_PROFILE=y
 # 仅编译 Hinlink OPC-H68K
 CONFIG_TARGET_DEVICE_rockchip_armv8_DEVICE_hinlink_opc-h68k=y
 
+
 # Wi-Fi AP
 CONFIG_PACKAGE_wpad-openssl=y
 
@@ -15,3 +16,4 @@ CONFIG_TARGET_ROOTFS_PARTSIZE=512
 
 # luci
 CONFIG_PACKAGE_luci-app-cpufreq=y
+# CONFIG_PACKAGE_luci-app-ssr-plus is not set
