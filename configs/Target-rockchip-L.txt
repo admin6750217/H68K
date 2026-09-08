@@ -6,6 +6,16 @@ CONFIG_TARGET_MULTI_PROFILE=y
 # 仅编译 Hinlink OPC-H68K
 CONFIG_TARGET_DEVICE_rockchip_armv8_DEVICE_hinlink_opc-h68k=y
 
+# H68K 1G × 2：SoC GMAC + RTL8211F
+CONFIG_PACKAGE_kmod-phy-realtek=y
+# H68K 2.5G × 2：RTL8125
+
+# 不使用以下 Realtek 独立网卡驱动
+# CONFIG_PACKAGE_kmod-r8126 is not set
+# CONFIG_PACKAGE_kmod-r8168 is not set
+# CONFIG_PACKAGE_kmod-r8169 is not set
+# CONFIG_PACKAGE_r8169-firmware is not set
+
 
 # Wi-Fi AP
 CONFIG_PACKAGE_wpad-openssl=y
