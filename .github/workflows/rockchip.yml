@@ -503,8 +503,8 @@ jobs:
 
           ls -lah "$FIRMWARE_DIR"
 
-      # ============================================================
-      # 准备 Release 上传文件
+            # ============================================================
+      # 准备 GitHub Release 上传文件
       # ============================================================
 
       - name: 准备 GitHub Release 上传文件
@@ -520,173 +520,56 @@ jobs:
 
           mkdir -p "$GITHUB_WORKSPACE/release"
 
+
           echo ""
-          echo "原始固件目录："
+          echo "检查固件目录"
+
+          # 优先使用前一步保存的变量
+          if [ -n "$FIRMWARE_DIR" ] && [ -d "$FIRMWARE_DIR" ]; then
+
+              echo "使用已有固件目录:"
+              echo "$FIRMWARE_DIR"
+
+          else
+
+              echo "FIRMWARE_DIR 无效，重新搜索"
+
+              FIRMWARE_DIR=$(
+                find /workdir/openwrt/bin/targets \
+                -type f \
+                -name '*.img.gz' \
+                -printf '%h\n' |
+                head -n1
+              )
+
+              if [ -z "$FIRMWARE_DIR" ]; then
+
+                  echo "ERROR: 未找到任何固件目录"
+
+                  echo ""
+                  echo "当前 targets:"
+                  find /workdir/openwrt/bin/targets \
+                    -maxdepth 5 \
+                    -print || true
+
+                  exit 1
+
+              fi
+
+          fi
+
+
+          echo ""
+          echo "最终固件目录:"
           echo "$FIRMWARE_DIR"
 
+
           if [ ! -d "$FIRMWARE_DIR" ]; then
-            echo "ERROR: FIRMWARE_DIR 不存在"
-            exit 1
-          fi
 
-          # --------------------------------------------------------
-          # 复制固件
-          # --------------------------------------------------------
-
-          echo ""
-          echo "复制固件："
-
-          find "$FIRMWARE_DIR" \
-            -maxdepth 1 \
-            -type f \
-            -name '*.img.gz' \
-            -exec cp -v {} "$GITHUB_WORKSPACE/release/" \;
-
-          # --------------------------------------------------------
-          # 复制配置文件
-          # --------------------------------------------------------
-
-          echo ""
-          echo "复制配置文件："
-
-          for FILE in \
-            config.buildinfo \
-            machine.config.buildinfo \
-            full.config.buildinfo
-          do
-
-            if [ -f "$FIRMWARE_DIR/$FILE" ]; then
-
-              cp -v \
-                "$FIRMWARE_DIR/$FILE" \
-                "$GITHUB_WORKSPACE/release/"
-
-            else
-
-              echo "WARNING: 未找到 $FILE"
-
-            fi
-
-          done
-
-          # --------------------------------------------------------
-          # 检查上传文件
-          # --------------------------------------------------------
-
-          echo ""
-          echo "========================================"
-          echo "Release 上传目录"
-          echo "========================================"
-
-          ls -lah "$GITHUB_WORKSPACE/release"
-
-          echo ""
-          echo "========================================"
-          echo "检查 Release 文件"
-          echo "========================================"
-
-          FILE_COUNT=$(
-            find "$GITHUB_WORKSPACE/release" \
-              -maxdepth 1 \
-              -type f |
-            wc -l
-          )
-
-          echo "文件数量：$FILE_COUNT"
-
-          IMG_COUNT=$(
-            find "$GITHUB_WORKSPACE/release" \
-              -maxdepth 1 \
-              -type f \
-              -name '*.img.gz' |
-            wc -l
-          )
-
-          echo "img.gz 数量：$IMG_COUNT"
-
-          if [ "$IMG_COUNT" -lt 1 ]; then
-
-            echo "ERROR: Release 目录没有 .img.gz 固件"
-
-            exit 1
+              echo "ERROR: 固件目录不存在"
+              exit 1
 
           fi
-
-          echo ""
-          echo "Release 文件准备完成"
-
-      # ============================================================
-      # 生成 Release 信息
-      # ============================================================
-
-      - name: 生成发布信息
-        run: |
-          set -e
-
-          TAG="$(
-            date '+%Y.%m.%d-%H%M%S'
-          )-Rockchip-H68K-${GITHUB_RUN_NUMBER}"
-
-          NAME="$(
-            echo "Rockchip H68K $(date '+%Y-%m-%d %H:%M:%S')"
-          )"
-
-          echo "RELEASE_TAG=$TAG" >> "$GITHUB_ENV"
-          echo "RELEASE_NAME=$NAME" >> "$GITHUB_ENV"
-
-          cat > /tmp/release.md <<EOF
-          ## Hinlink OPC-H68K
-
-          - Target: Hinlink OPC-H68K
-          - Architecture: Rockchip ARM64
-          - LEDE branch: $REPO_BRANCH
-          - LEDE commit: $WRT_HASH
-          - Build mode: $BUILD_MODE
-          - Build time: $BUILD_DATE
-          - GitHub Run: $GITHUB_RUN_NUMBER
-
-          ## Firmware
-
-          本次编译固件适用于 Hinlink OPC-H68K。
-
-          ## Files
-
-          - .img.gz : 固件
-          - config.buildinfo : OpenWrt 编译配置
-          - machine.config.buildinfo : H68K 机器配置
-          - full.config.buildinfo : 完整编译配置
-          EOF
-
-          echo "========================================"
-          echo "Release 信息"
-          echo "========================================"
-
-          echo "TAG : $RELEASE_TAG"
-          echo "NAME: $RELEASE_NAME"
-
-      # ============================================================
-      # 发布固件到 GitHub Release
-      # ============================================================
-
-      - name: 发布固件到 GitHub
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ env.RELEASE_TAG }}
-          name: ${{ env.RELEASE_NAME }}
-          body_path: /tmp/release.md
-
-          # 文件匹配不到时直接失败
-          fail_on_unmatched_files: true
-
-          files: |
-            release/*.img.gz
-            release/config.buildinfo
-            release/machine.config.buildinfo
-            release/full.config.buildinfo
-
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
       # ============================================================
       # 验证 Release
       # ============================================================
