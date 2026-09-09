@@ -50,10 +50,18 @@ jobs:
 
     steps:
 
+      # ============================================================
+      # 检出配置仓库
+      # ============================================================
+
       - name: 检出配置仓库
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
+
+      # ============================================================
+      # 确定编译模式
+      # ============================================================
 
       - name: 确定编译模式
         run: |
@@ -64,6 +72,12 @@ jobs:
           else
             echo "BUILD_MODE=正常编译" >> "$GITHUB_ENV"
           fi
+
+          echo "编译模式：${BUILD_MODE:-正常编译}"
+
+      # ============================================================
+      # 初始化编译环境
+      # ============================================================
 
       - name: 初始化编译环境
         run: |
@@ -91,12 +105,23 @@ jobs:
           rm -rf "$GITHUB_WORKSPACE/bin"
           rm -rf "$GITHUB_WORKSPACE/tmp"
           rm -rf "$GITHUB_WORKSPACE/logs"
+          rm -rf "$GITHUB_WORKSPACE/release"
 
           echo "BUILD_DATE=$(date '+%Y-%m-%d %H:%M:%S')" >> "$GITHUB_ENV"
+
+          echo "初始化完成"
+
+      # ============================================================
+      # 下载 LEDE 源码
+      # ============================================================
 
       - name: 下载 LEDE 源码
         run: |
           set -e
+
+          echo "========================================"
+          echo "下载 LEDE 源码"
+          echo "========================================"
 
           cd /workdir
 
@@ -115,6 +140,12 @@ jobs:
           echo "WRT_HASH=$(git log -1 --pretty=format:'%h')" \
             >> "$GITHUB_ENV"
 
+          echo "LEDE commit：$(git log -1 --pretty=format:'%H')"
+
+      # ============================================================
+      # 执行自定义脚本一
+      # ============================================================
+
       - name: 执行自定义脚本一
         working-directory: /workdir/openwrt
         run: |
@@ -126,6 +157,12 @@ jobs:
 
           bash "$GITHUB_WORKSPACE/$DIY_P1_SH"
 
+          echo "DIY1 完成"
+
+      # ============================================================
+      # 恢复编译缓存
+      # ============================================================
+
       - name: 恢复编译缓存
         uses: actions/cache@v4
         with:
@@ -136,6 +173,10 @@ jobs:
           key: rockchip-${{ env.REPO_BRANCH }}-${{ env.WRT_HASH }}
           restore-keys: |
             rockchip-${{ env.REPO_BRANCH }}-
+
+      # ============================================================
+      # 启用编译缓存
+      # ============================================================
 
       - name: 启用编译缓存
         working-directory: /workdir/openwrt
@@ -151,12 +192,22 @@ jobs:
           CONFIG_CCACHE=y
           EOF
 
+          echo "CCACHE 已启用"
+
+      # ============================================================
+      # 更新软件源
+      # ============================================================
+
       - name: 更新软件源
         working-directory: /workdir/openwrt
         run: |
           set -e
 
           ./scripts/feeds update -a
+
+      # ============================================================
+      # 安装软件源
+      # ============================================================
 
       - name: 安装软件源
         working-directory: /workdir/openwrt
@@ -165,17 +216,22 @@ jobs:
 
           ./scripts/feeds install -a
 
+      # ============================================================
+      # 导入编译配置
+      # ============================================================
+
       - name: 导入编译配置
         working-directory: /workdir/openwrt
         run: |
           set -e
 
           echo "========================================"
+          echo "导入编译配置"
+          echo "========================================"
 
           if [ "$BUILD_MODE" = "仅编译机器 config.buildinfo" ]; then
 
             echo "编译模式：仅编译机器 config.buildinfo"
-            echo "========================================"
 
             test -f "$GITHUB_WORKSPACE/$MACHINE_CONFIG_FILE"
 
@@ -184,7 +240,6 @@ jobs:
           else
 
             echo "编译模式：正常编译"
-            echo "========================================"
 
             test -f "$GITHUB_WORKSPACE/$PLATFORM_FILE"
             test -f "$GITHUB_WORKSPACE/$PACKAGE_FILE"
@@ -196,12 +251,17 @@ jobs:
 
           echo "配置导入完成"
 
+      # ============================================================
+      # 应用自定义文件
+      # ============================================================
+
       - name: 应用自定义文件
         working-directory: /workdir/openwrt
         run: |
           set -e
 
           if [ -d "$GITHUB_WORKSPACE/files" ]; then
+
             echo "发现 files/ 目录，开始复制"
 
             cp -a \
@@ -209,9 +269,16 @@ jobs:
               .
 
             echo "files/ 应用完成"
+
           else
+
             echo "未发现 files/，跳过"
+
           fi
+
+      # ============================================================
+      # 执行自定义脚本二
+      # ============================================================
 
       - name: 执行自定义脚本二
         working-directory: /workdir/openwrt
@@ -225,6 +292,10 @@ jobs:
           bash "$GITHUB_WORKSPACE/$DIY_P2_SH"
 
           echo "DIY2 完成"
+
+      # ============================================================
+      # 生成并验证最终配置
+      # ============================================================
 
       - name: 生成并验证最终配置
         working-directory: /workdir/openwrt
@@ -253,9 +324,11 @@ jobs:
 
           if [ "$COUNT" -ne 1 ]; then
             echo "ERROR: Rockchip ARM64 目标设备不是唯一设备"
+
             grep \
               '^CONFIG_TARGET_DEVICE_rockchip_armv8_DEVICE_.*=y$' \
               .config || true
+
             exit 1
           fi
 
@@ -264,6 +337,17 @@ jobs:
             .config
 
           echo "H68K 目标验证通过"
+
+          echo ""
+          echo "目标配置："
+
+          grep \
+            '^CONFIG_TARGET_DEVICE_rockchip_armv8_DEVICE_hinlink_opc-h68k=' \
+            .config
+
+      # ============================================================
+      # 下载编译依赖
+      # ============================================================
 
       - name: 下载编译依赖
         working-directory: /workdir/openwrt
@@ -277,6 +361,12 @@ jobs:
             -size -1024c \
             -delete || true
 
+          echo "编译依赖下载完成"
+
+      # ============================================================
+      # 正式编译
+      # ============================================================
+
       - name: 开始正式编译
         working-directory: /workdir/openwrt
         run: |
@@ -284,15 +374,33 @@ jobs:
 
           N=$(nproc)
 
+          echo "========================================"
+          echo "开始正式编译"
+          echo "========================================"
+
           echo "CPU 核心数：$N"
-          echo "开始并行编译..."
+          echo "并行线程：$((N + 1))"
 
           make -j$((N + 1)) || {
-            echo "并行编译失败，切换单线程详细编译"
+
+            echo ""
+            echo "========================================"
+            echo "并行编译失败"
+            echo "切换单线程详细编译"
+            echo "========================================"
+
             make -j1 V=s
+
           }
 
+          echo ""
+          echo "========================================"
           echo "编译完成"
+          echo "========================================"
+
+      # ============================================================
+      # 整理固件
+      # ============================================================
 
       - name: 整理固件和编译配置
         working-directory: /workdir/openwrt
@@ -303,37 +411,77 @@ jobs:
           echo "整理编译结果"
           echo "========================================"
 
-          FIRMWARE_DIR=$(
-            find bin/targets \
-              -mindepth 2 \
-              -maxdepth 2 \
-              -type d |
-            head -n1
-          )
-
-          test -n "$FIRMWARE_DIR"
+          # Rockchip ARM64 固定目标目录
+          FIRMWARE_DIR="bin/targets/rockchip/armv8"
 
           echo "固件目录：$FIRMWARE_DIR"
 
+          if [ ! -d "$FIRMWARE_DIR" ]; then
+
+            echo "ERROR: 固件目录不存在"
+
+            echo ""
+            echo "当前 bin/targets 内容："
+
+            find bin/targets \
+              -maxdepth 4 \
+              -print || true
+
+            exit 1
+          fi
+
           echo "FIRMWARE_DIR=$FIRMWARE_DIR" >> "$GITHUB_ENV"
 
-          test -n "$(
+          echo ""
+          echo "========================================"
+          echo "检查 img.gz 固件"
+          echo "========================================"
+
+          find "$FIRMWARE_DIR" \
+            -maxdepth 1 \
+            -type f \
+            -name '*.img.gz' \
+            -print
+
+          IMG_FILE=$(
             find "$FIRMWARE_DIR" \
               -maxdepth 1 \
               -type f \
               -name '*.img.gz' \
               -print \
               -quit
-          )"
+          )
 
-          test -f "$FIRMWARE_DIR/config.buildinfo"
+          if [ -z "$IMG_FILE" ]; then
 
+            echo "ERROR: 没有找到任何 .img.gz 固件"
+
+            echo ""
+            echo "固件目录完整内容："
+
+            ls -lah "$FIRMWARE_DIR"
+
+            exit 1
+          fi
+
+          echo "检测到固件：$IMG_FILE"
+
+          # 官方 config.buildinfo
+          if [ ! -f "$FIRMWARE_DIR/config.buildinfo" ]; then
+            echo "ERROR: config.buildinfo 不存在"
+            exit 1
+          fi
+
+          # 保存完整配置
           cp \
             .config \
             "$FIRMWARE_DIR/full.config.buildinfo"
 
+          # 生成机器配置
           {
             echo "# Hinlink OPC-H68K"
+            echo "# Generated: $(date '+%Y-%m-%d %H:%M:%S')"
+            echo ""
 
             grep '^CONFIG_TARGET_rockchip=' .config || true
             grep '^CONFIG_TARGET_rockchip_armv8=' .config || true
@@ -345,9 +493,131 @@ jobs:
 
           } > "$FIRMWARE_DIR/machine.config.buildinfo"
 
+          # 删除 packages，减少无关文件
           rm -rf "$FIRMWARE_DIR/packages"
 
+          echo ""
+          echo "========================================"
           echo "固件整理完成"
+          echo "========================================"
+
+          ls -lah "$FIRMWARE_DIR"
+
+      # ============================================================
+      # 准备 Release 上传文件
+      # ============================================================
+
+      - name: 准备 GitHub Release 上传文件
+        run: |
+          set -e
+
+          echo "========================================"
+          echo "准备 GitHub Release 上传文件"
+          echo "========================================"
+
+          # 清空旧 release 目录
+          rm -rf "$GITHUB_WORKSPACE/release"
+
+          mkdir -p "$GITHUB_WORKSPACE/release"
+
+          echo ""
+          echo "原始固件目录："
+          echo "$FIRMWARE_DIR"
+
+          if [ ! -d "$FIRMWARE_DIR" ]; then
+            echo "ERROR: FIRMWARE_DIR 不存在"
+            exit 1
+          fi
+
+          # --------------------------------------------------------
+          # 复制固件
+          # --------------------------------------------------------
+
+          echo ""
+          echo "复制固件："
+
+          find "$FIRMWARE_DIR" \
+            -maxdepth 1 \
+            -type f \
+            -name '*.img.gz' \
+            -exec cp -v {} "$GITHUB_WORKSPACE/release/" \;
+
+          # --------------------------------------------------------
+          # 复制配置文件
+          # --------------------------------------------------------
+
+          echo ""
+          echo "复制配置文件："
+
+          for FILE in \
+            config.buildinfo \
+            machine.config.buildinfo \
+            full.config.buildinfo
+          do
+
+            if [ -f "$FIRMWARE_DIR/$FILE" ]; then
+
+              cp -v \
+                "$FIRMWARE_DIR/$FILE" \
+                "$GITHUB_WORKSPACE/release/"
+
+            else
+
+              echo "WARNING: 未找到 $FILE"
+
+            fi
+
+          done
+
+          # --------------------------------------------------------
+          # 检查上传文件
+          # --------------------------------------------------------
+
+          echo ""
+          echo "========================================"
+          echo "Release 上传目录"
+          echo "========================================"
+
+          ls -lah "$GITHUB_WORKSPACE/release"
+
+          echo ""
+          echo "========================================"
+          echo "检查 Release 文件"
+          echo "========================================"
+
+          FILE_COUNT=$(
+            find "$GITHUB_WORKSPACE/release" \
+              -maxdepth 1 \
+              -type f |
+            wc -l
+          )
+
+          echo "文件数量：$FILE_COUNT"
+
+          IMG_COUNT=$(
+            find "$GITHUB_WORKSPACE/release" \
+              -maxdepth 1 \
+              -type f \
+              -name '*.img.gz' |
+            wc -l
+          )
+
+          echo "img.gz 数量：$IMG_COUNT"
+
+          if [ "$IMG_COUNT" -lt 1 ]; then
+
+            echo "ERROR: Release 目录没有 .img.gz 固件"
+
+            exit 1
+
+          fi
+
+          echo ""
+          echo "Release 文件准备完成"
+
+      # ============================================================
+      # 生成 Release 信息
+      # ============================================================
 
       - name: 生成发布信息
         run: |
@@ -374,7 +644,29 @@ jobs:
           - Build mode: $BUILD_MODE
           - Build time: $BUILD_DATE
           - GitHub Run: $GITHUB_RUN_NUMBER
+
+          ## Firmware
+
+          本次编译固件适用于 Hinlink OPC-H68K。
+
+          ## Files
+
+          - .img.gz : 固件
+          - config.buildinfo : OpenWrt 编译配置
+          - machine.config.buildinfo : H68K 机器配置
+          - full.config.buildinfo : 完整编译配置
           EOF
+
+          echo "========================================"
+          echo "Release 信息"
+          echo "========================================"
+
+          echo "TAG : $RELEASE_TAG"
+          echo "NAME: $RELEASE_NAME"
+
+      # ============================================================
+      # 发布固件到 GitHub Release
+      # ============================================================
 
       - name: 发布固件到 GitHub
         uses: softprops/action-gh-release@v2
@@ -382,13 +674,81 @@ jobs:
           tag_name: ${{ env.RELEASE_TAG }}
           name: ${{ env.RELEASE_NAME }}
           body_path: /tmp/release.md
+
+          # 文件匹配不到时直接失败
+          fail_on_unmatched_files: true
+
           files: |
-            ${{ env.FIRMWARE_DIR }}/*.img.gz
-            ${{ env.FIRMWARE_DIR }}/config.buildinfo
-            ${{ env.FIRMWARE_DIR }}/machine.config.buildinfo
-            ${{ env.FIRMWARE_DIR }}/full.config.buildinfo
+            release/*.img.gz
+            release/config.buildinfo
+            release/machine.config.buildinfo
+            release/full.config.buildinfo
+
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # ============================================================
+      # 验证 Release
+      # ============================================================
+
+      - name: 验证 Release 上传结果
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -e
+
+          echo "========================================"
+          echo "验证 GitHub Release"
+          echo "========================================"
+
+          echo "Release Tag：$RELEASE_TAG"
+
+          gh release view \
+            "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY"
+
+          echo ""
+          echo "========================================"
+          echo "Release 附件"
+          echo "========================================"
+
+          gh release view \
+            "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json assets \
+            --jq '.assets[] | [.name,.size] | @tsv'
+
+          echo ""
+          echo "========================================"
+          echo "检查固件附件"
+          echo "========================================"
+
+          IMG_COUNT=$(
+            gh release view \
+              "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json assets \
+              --jq '.assets[].name' |
+            grep -E '\.img\.gz$' |
+            wc -l
+          )
+
+          echo "Release 中 .img.gz 数量：$IMG_COUNT"
+
+          if [ "$IMG_COUNT" -lt 1 ]; then
+
+            echo "ERROR: GitHub Release 中没有 .img.gz 固件"
+
+            exit 1
+
+          fi
+
+          echo ""
+          echo "GitHub Release 上传验证成功"
+
+      # ============================================================
+      # 清理旧 Release，只保留最新三个
+      # ============================================================
 
       - name: 清理旧版本并保留最新三个
         env:
@@ -429,17 +789,37 @@ jobs:
 
           done
 
+          echo ""
           echo "仅保留最新三个 H68K Release"
+
+      # ============================================================
+      # 编译完成摘要
+      # ============================================================
 
       - name: 编译完成摘要
         run: |
+          echo ""
           echo "========================================"
           echo "编译成功"
           echo "========================================"
+
           echo "设备 : Hinlink OPC-H68K"
           echo "架构 : Rockchip ARM64"
           echo "模式 : $BUILD_MODE"
           echo "提交 : $WRT_HASH"
           echo "发布 : $RELEASE_TAG"
           echo "时间 : $BUILD_DATE"
+
+          echo ""
+          echo "固件目录："
+          echo "$FIRMWARE_DIR"
+
+          echo ""
+          echo "Release 文件："
+
+          ls -lah "$GITHUB_WORKSPACE/release"
+
+          echo ""
+          echo "========================================"
+          echo "全部完成"
           echo "========================================"
