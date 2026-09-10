@@ -25,7 +25,7 @@ env:
   REPO_URL: https://github.com/VIKINGYFY/immortalwrt
   REPO_BRANCH: main
 
-  PLATFORM_FILE: configs/Target-rockchip-L.txt
+  PLATFORM_FILE: configs/QCA.txt
   PACKAGE_FILE: configs/Packages.txt
   MACHINE_CONFIG_FILE: configs/config.buildinfo
 
