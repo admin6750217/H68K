@@ -22,7 +22,7 @@ on:
   
 env:
   GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
-REPO_URL: https://github.com/VIKINGYFY/immortalwrt
+  REPO_URL: https://github.com/VIKINGYFY/immortalwrt
   REPO_BRANCH: main
 
   PLATFORM_FILE: configs/Target-rockchip-L.txt
