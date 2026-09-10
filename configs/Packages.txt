@@ -1,9 +1,12 @@
 # 一、插件
 
 # 1.1 科学上网 / 代理
-CONFIG_PACKAGE_luci-app-homeproxy=y
-CONFIG_PACKAGE_luci-app-openclash=y
+# CONFIG_PACKAGE_luci-app-homeproxy is not set
+# CONFIG_PACKAGE_luci-app-openclash is not set
+
 CONFIG_PACKAGE_luci-app-passwall=y
+CONFIG_PACKAGE_luci-app-daede_daed=y
+
 # CONFIG_PACKAGE_luci-app-passwall_INCLUDE_V2ray_Plugin is not set
 # CONFIG_PACKAGE_luci-app-passwall_INCLUDE_Xray is not set
 # CONFIG_PACKAGE_luci-app-passwall2 is not set
