@@ -1,4 +1,4 @@
-name: lede_x86
+name: immortalwrt-nss
 
 on:
   workflow_dispatch:
