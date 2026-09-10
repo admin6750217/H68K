@@ -7,7 +7,7 @@ on:
 
 env:
   OPENWRT_NAME: immortalwrt-nss
-  REPO: moruiris/Actions-OpenWrt
+  REPO: googlewmb/Actions-OpenWrt
   REPO_URL: https://github.com/LiBwrt/LibWrt
   REPO_BRANCH: 25.12-nss
   CONFIG_FILE: nss/immortalwrt/.config
