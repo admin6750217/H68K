@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2019-2020 P3TERX <https://p3terx.com>
+# Copyright (c) 2019-2020 P3TERX
 #
 # This is free software, licensed under the MIT License.
 # See /LICENSE for more information.
@@ -11,28 +11,33 @@
 name: QCA-ALL
 
 permissions: write-all
-#开启写权限，防止无法上传到release
 
 on:
   repository_dispatch:
   workflow_dispatch:
   schedule:
-   - cron: 0 20 * * 2
-   #     分,时,日,月,周。每周三 20时执行一次 (UTC时间)
-  
+    - cron: 0 20 * * 2
+      # 分,时,日,月,周
+      # 每周三北京时间 04:00 执行一次
+
 env:
-  GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # OpenWrt 源码
   REPO_URL: https://github.com/VIKINGYFY/immortalwrt
   REPO_BRANCH: main
 
+  # 配置文件
   PLATFORM_FILE: configs/QCA.txt
   PACKAGE_FILE: configs/Packages.txt
   MACHINE_CONFIG_FILE: configs/config.buildinfo
 
+  # 脚本
   FREE_DISK_SH: scripts/free_disk_space.sh
   ENV_SH: scripts/environment.sh
   DIY_P1_SH: scripts/diy-part1.sh
   DIY_P2_SH: scripts/diy-part2.sh
+
   TZ: Asia/Shanghai
 
 jobs:
@@ -40,169 +45,272 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+
+    # ==============================
+    # 检查代码
+    # ==============================
     - name: 检查代码
       uses: actions/checkout@main
 
+    # ==============================
+    # 初始化环境
+    # ==============================
     - name: 初始化环境
       env:
         DEBIAN_FRONTEND: noninteractive
       run: |
-        chmod +x $FREE_DISK_SH && $FREE_DISK_SH
-        chmod +x $ENV_SH && $ENV_SH
+        chmod +x "$FREE_DISK_SH"
+        "$FREE_DISK_SH"
+
+        chmod +x "$ENV_SH"
+        "$ENV_SH"
+
         sudo rm -rf /etc/apt/sources.list.d/*
         sudo rm -rf /var/lib/apt/lists/*
-        # 设置时区
-        sudo timedatectl set-timezone "$TZ"
-        sudo mkdir -p /workdir
-        sudo chown $USER:$GROUPS /workdir
 
-    - name: 检查空间使用情况（清理情况）
+        sudo timedatectl set-timezone "$TZ"
+
+        sudo mkdir -p /workdir
+        sudo chown "$USER:$GROUPS" /workdir
+
+    # ==============================
+    # 检查空间
+    # ==============================
+    - name: 检查空间使用情况
       if: (!cancelled())
       run: df -hT
 
+    # ==============================
+    # 克隆源码
+    # ==============================
     - name: 克隆源码
       working-directory: /workdir
       run: |
-        git clone $REPO_URL --depth 1 -b $REPO_BRANCH openwrt
-        ln -sf /workdir/openwrt $GITHUB_WORKSPACE/openwrt
+        git clone "$REPO_URL" --depth 1 -b "$REPO_BRANCH" openwrt
 
-        cd ./openwrt/ && echo "WRT_HASH=$(git log -1 --pretty=format:'%h')" >> $GITHUB_ENV
+        ln -sf /workdir/openwrt "$GITHUB_WORKSPACE/openwrt"
 
-        # GitHub Action 移除国内下载源
+        cd /workdir/openwrt
+
+        echo "WRT_HASH=$(git log -1 --pretty=format:'%h')" >> "$GITHUB_ENV"
+
+        # 移除国内镜像源
         PROJECT_MIRRORS_FILE="./scripts/projectsmirrors.json"
+
         if [ -f "$PROJECT_MIRRORS_FILE" ]; then
           sed -i '/.cn\//d; /tencent/d; /aliyun/d' "$PROJECT_MIRRORS_FILE"
         fi
 
+    # ==============================
+    # 检查缓存
+    # ==============================
     - name: 检查缓存
       id: check-cache
       uses: actions/cache@main
       with:
-        key: rockchip-${{env.REPO_BRANCH}}-${{env.WRT_HASH}}
-        restore-keys: rockchip-${{env.REPO_BRANCH}}
+        key: qualcomm-${{ env.REPO_BRANCH }}-${{ env.WRT_HASH }}
+        restore-keys: qualcomm-${{ env.REPO_BRANCH }}
         path: |
           ./openwrt/.ccache
           ./openwrt/staging_dir/host*
           ./openwrt/staging_dir/tool*
 
-    - name: 开启CCACHE配置
+    # ==============================
+    # 开启 CCACHE
+    # ==============================
+    - name: 开启 CCACHE 配置
       run: |
         echo 'CONFIG_DEVEL=y' >> openwrt/.config
         echo 'CONFIG_CCACHE=y' >> openwrt/.config
 
+    # ==============================
+    # 更新缓存
+    # ==============================
     - name: 更新缓存
       run: |
         if [ -d "./openwrt/staging_dir" ]; then
-          find "./openwrt/staging_dir" -type d -name "stamp" -not -path "*target*" | while read -r DIR; do
+          find "./openwrt/staging_dir" \
+            -type d \
+            -name "stamp" \
+            -not -path "*target*" |
+          while read -r DIR; do
             find "$DIR" -type f -exec touch {} +
           done
 
-          mkdir -p ./openwrt/tmp && echo "1" > ./openwrt/tmp/.build
+          mkdir -p ./openwrt/tmp
+          echo "1" > ./openwrt/tmp/.build
 
-          echo "toolchain skiped done!"
+          echo "toolchain skipped done!"
         else
           echo "caches missed!"
         fi
 
-        if ${{steps.check-cache.outputs.cache-hit != 'true'}}; then
-          CACHE_LIST=$(gh cache list --key "rockchip-$REPO_BRANCH" | cut -f 1)
+        if [ "${{ steps.check-cache.outputs.cache-hit }}" != "true" ]; then
+          CACHE_LIST=$(gh cache list --key "qualcomm-$REPO_BRANCH" | cut -f 1)
+
           for CACHE_KEY in $CACHE_LIST; do
-            gh cache delete $CACHE_KEY
+            gh cache delete "$CACHE_KEY" || true
           done
 
           echo "caches cleanup done!"
         fi
 
+    # ==============================
+    # 安装 feeds
+    # ==============================
     - name: 安装 feeds
       run: |
         cd openwrt
+
         ./scripts/feeds update -a
         ./scripts/feeds install -a
 
-    - name: 导入补丁和配置 & 执行脚本
+    # ==============================
+    # 导入配置 & 执行 DIY
+    # ==============================
+    - name: 导入配置 & 执行 DIY
       run: |
-        [ -d files ] && mv files openwrt/files || echo "files not found"
-        [ -f $PLATFORM_FILE ] && cat $PLATFORM_FILE >> openwrt/.config
-        [ -f $CONFIG_FILE ] && cat $CONFIG_FILE >> openwrt/.config
-        [ -f $CONFIG_5G ] && cat $CONFIG_5G >> openwrt/.config
-        chmod +x $VLMCSD_SH && $VLMCSD_SH
-        cd openwrt
-        rm target/linux/rockchip/patches-*/991-arm64-dts-rockchip-add-more-cpu-operating-points-for.patch || true
-        chmod +x $GITHUB_WORKSPACE/$SETTINGS_SH && $GITHUB_WORKSPACE/$SETTINGS_SH
-        chmod +x $GITHUB_WORKSPACE/$PACKAGES_SH && $GITHUB_WORKSPACE/$PACKAGES_SH
-        chmod +x $GITHUB_WORKSPACE/$INSTALL5G_SH && $GITHUB_WORKSPACE/$INSTALL5G_SH
-        chmod +x $GITHUB_WORKSPACE/$CLASH_CORE_SH && $GITHUB_WORKSPACE/$CLASH_CORE_SH
+        # 复制 files 目录
+        if [ -d "$GITHUB_WORKSPACE/files" ]; then
+          rm -rf openwrt/files
+          mv "$GITHUB_WORKSPACE/files" openwrt/files
+        else
+          echo "files not found"
+        fi
 
+        # 导入 QCA 配置
+        if [ -f "$PLATFORM_FILE" ]; then
+          cat "$PLATFORM_FILE" >> openwrt/.config
+        else
+          echo "ERROR: $PLATFORM_FILE not found"
+          exit 1
+        fi
+
+        # 导入软件包配置
+        if [ -f "$PACKAGE_FILE" ]; then
+          cat "$PACKAGE_FILE" >> openwrt/.config
+        else
+          echo "WARNING: $PACKAGE_FILE not found"
+        fi
+
+        # 执行 DIY Part 1
+        if [ -f "$GITHUB_WORKSPACE/$DIY_P1_SH" ]; then
+          chmod +x "$GITHUB_WORKSPACE/$DIY_P1_SH"
+          "$GITHUB_WORKSPACE/$DIY_P1_SH"
+        else
+          echo "WARNING: $DIY_P1_SH not found"
+        fi
+
+        # 执行 DIY Part 2
+        if [ -f "$GITHUB_WORKSPACE/$DIY_P2_SH" ]; then
+          chmod +x "$GITHUB_WORKSPACE/$DIY_P2_SH"
+          "$GITHUB_WORKSPACE/$DIY_P2_SH"
+        else
+          echo "WARNING: $DIY_P2_SH not found"
+        fi
+
+    # ==============================
+    # 下载文件
+    # ==============================
     - name: 下载文件
       run: |
         cd openwrt
+
         make defconfig
-        make download -j8 V=10
+
+        make download -j8 V=s
+
         find dl -size -1024c -exec ls -l {} \;
         find dl -size -1024c -exec rm -f {} \;
 
+    # ==============================
+    # 编译前空间
+    # ==============================
     - name: 空间使用情况（编译前）
       if: (!cancelled())
       run: df -hT
 
+    # ==============================
+    # 编译固件
+    # ==============================
     - name: 编译固件
       id: compile
       run: |
         cd openwrt
-        make defconfig
-        echo -e "$(nproc) thread compile"
-        make -j$(($(nproc)+1)) || make -j1 V=s
-        echo "status=success" >> $GITHUB_OUTPUT
 
-    - name: 空间使用情况（编译占用）
+        make defconfig
+
+        echo "$(nproc) thread compile"
+
+        make -j$(($(nproc)+1)) || make -j1 V=s
+
+        echo "status=success" >> "$GITHUB_OUTPUT"
+
+    # ==============================
+    # 编译后空间
+    # ==============================
+    - name: 空间使用情况（编译后）
       if: (!cancelled())
       run: df -hT
 
+    # ==============================
+    # 上传完整 bin
+    # ==============================
     - name: 上传 bin 目录
       uses: actions/upload-artifact@main
-      if: steps.compile.outputs.status == 'success' && env.UPLOAD_BIN_DIR == 'true'
+      if: steps.compile.outputs.status == 'success'
       with:
-        name: OpenWrt_bin${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+        name: OpenWrt_bin_${{ env.WRT_HASH }}
         path: openwrt/bin
 
+    # ==============================
+    # 整理固件
+    # ==============================
     - name: 整理文件
       id: organize
       if: steps.compile.outputs.status == 'success' && !cancelled()
       run: |
         cd openwrt/bin/targets/*/*
-        rm -rf *.bin
-        rm -rf *.buildinfo 
-        rm -rf *.json 
-        rm -rf *.manifest 
+
+        rm -rf *.buildinfo
+        rm -rf *.json
+        rm -rf *.manifest
         rm -rf packages
-        echo "FIRMWARE=$PWD" >> $GITHUB_ENV
-        echo "status=success" >> $GITHUB_OUTPUT
 
-    - name: 固件重命名
-      if: steps.organize.outputs.status == 'success' && !cancelled()
-      shell: bash
-      run: |
-        cd openwrt/bin/targets/*/*
-        for file in *rockchip-armv8-*.gz; do
-          new_name=$(echo "$file" | sed 's/rockchip-armv8-//')
-          mv -v "$file" "$new_name"
-        done
+        echo "FIRMWARE=$PWD" >> "$GITHUB_ENV"
+        echo "status=success" >> "$GITHUB_OUTPUT"
 
+    # ==============================
+    # 上传固件目录
+    # ==============================
     - name: 上传固件目录
       uses: actions/upload-artifact@main
-      if: env.UPLOAD_FIRMWARE == 'true' && steps.organize.outputs.status == 'success' && !cancelled()
+      if: steps.organize.outputs.status == 'success' && !cancelled()
       with:
-        name: OpenWrt_firmware${{ env.DEVICE_NAME }}${{ env.FILE_DATE }}
+        name: OpenWrt_firmware_${{ env.WRT_HASH }}
         path: ${{ env.FIRMWARE }}
 
+    # ==============================
+    # 生成 Release 标签
+    # ==============================
     - name: 生成发布标签
       id: tag
       if: steps.compile.outputs.status == 'success' && !cancelled()
       run: |
-        echo -e "🎉 rockchip平台\n✅ 主线源码\n🍃 如出现不稳定可尝试cpu降频\n❗️ ip地址 : 192.168.8.1" >> release.txt
-        echo "release_tag=$(date +"%Y.%m.%d_Rockchip")" >> $GITHUB_OUTPUT
-        echo "status=success" >> $GITHUB_OUTPUT
+        cat > release.txt << EOF
+        🎉 Qualcomm QCA 平台
+        ✅ ImmortalWrt 主线源码
+        🔧 自动编译
+        📦 Commit: $WRT_HASH
+        ❗️ 默认 IP 请以实际配置为准
+        EOF
 
+        echo "release_tag=$(date +"%Y.%m.%d_QCA")" >> "$GITHUB_OUTPUT"
+        echo "status=success" >> "$GITHUB_OUTPUT"
+
+    # ==============================
+    # 上传固件到 Release
+    # ==============================
     - name: 上传固件到发布
       uses: softprops/action-gh-release@master
       if: steps.tag.outputs.status == 'success' && !cancelled()
