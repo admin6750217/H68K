@@ -8,8 +8,8 @@ on:
 env:
   OPENWRT_NAME: immortalwrt-nss
   REPO: moruiris/Actions-OpenWrt
-  REPO_URL: https://github.com/VIKINGYFY/immortalwrt
-  REPO_BRANCH: main
+  REPO_URL: https://github.com/LiBwrt/LibWrt
+  REPO_BRANCH: 25.12-nss
   CONFIG_FILE: nss/immortalwrt/.config
   CONFIG_BUILD: nss/immortalwrt/config.buildinfo
   DIY_P1_SH: nss/diy-part1.sh
