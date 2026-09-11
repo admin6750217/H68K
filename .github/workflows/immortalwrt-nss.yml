@@ -101,7 +101,7 @@ jobs:
     - name: 获取固件设备名字
       working-directory: ./openwrt
       run: |
-        grep '^CONFIG_TARGET_.*_DEVICE_.*=y' .config | sed -r 's/^CONFIG_TARGET_(.*)_DEVICE_(.*)=y/\1_\2/' > DEVICE_NAME
+        grep '^CONFIG_TARGET_.*_DEVICE_.*=y' .config | sed -r 's/^CONFIG_TARGET_.*_DEVICE_(.*)=y/\1/' | paste -sd '_' - > DEVICE_NAME
         [ -s DEVICE_NAME ] && echo "DEVICE_NAME=$(cat DEVICE_NAME)" >> $GITHUB_ENV
 
     - name: 上传bin目录文件
@@ -114,7 +114,7 @@ jobs:
     - name: 整理文件到firmware目录
       id: organize
       if: steps.compile.outcome == 'success'
-      run: | 
+      run: |
         mkdir firmware
         cp -v ./openwrt/.config  ./firmware/${{ env.date1 }}_${{ env.OPENWRT_NAME }}_${{ env.DEVICE_NAME }}.config
         find openwrt/bin/targets/*/*/ -maxdepth 1 \
@@ -152,13 +152,15 @@ jobs:
         body_path: release.txt
 
     - name: config文件上传自动更新1
-      run : |
+      run: |
         git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
         git config --global user.name "github-actions[bot]"
+
     - name: config文件上传自动更新2
       run: |
         cd $GITHUB_WORKSPACE
         git clone -b main https://github.com/${{ env.REPO }}.git main
+
     - name: config文件上传自动更新3
       run: |
         cp ./openwrt/.config $GITHUB_WORKSPACE/main/${{ env.CONFIG_FILE }}
