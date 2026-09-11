@@ -11,6 +11,32 @@ CONFIG_TARGET_DEVICE_qualcommax_ipq60xx_DEVICE_jdcloud_re-ss-01=y
 CONFIG_HAS_SUBTARGETS=y
 CONFIG_HAS_DEVICES=y
 
+
+# 1. DAE / DAED 所需的 OpenWrt 内核能力
+# BTF 依赖完整 DWARF；若 DEBUG_INFO_REDUCED 为 y，Kconfig 会取消 BTF。
+CONFIG_KERNEL_DEBUG_INFO=y
+# CONFIG_KERNEL_DEBUG_INFO_REDUCED is not set
+CONFIG_KERNEL_DEBUG_INFO_BTF=y
+CONFIG_KERNEL_BPF_EVENTS=y
+CONFIG_KERNEL_XDP_SOCKETS=y
+
+# daed 使用内核内置的 /sys/kernel/btf/vmlinux，而不是 vmlinux-btf 包。
+CONFIG_DAED_USE_KERNEL_BTF=y
+
+# 两个服务不要同时启用：daed 已包含 dae core。保留 dae 包仅供手工切换使用。
+CONFIG_PACKAGE_dae=y
+CONFIG_PACKAGE_daed=y
+CONFIG_PACKAGE_luci-app-daed=y
+CONFIG_PACKAGE_kmod-sched-core=y
+CONFIG_PACKAGE_kmod-sched-bpf=y
+CONFIG_PACKAGE_kmod-veth=y
+CONFIG_PACKAGE_kmod-xdp-sockets-diag=y
+
+# 2. TCP 拥塞控制
+# 不编入 flow offload：它可能绕过 dae 依赖的分类、标记和策略路径。
+CONFIG_PACKAGE_kmod-tcp-bbr=y
+CONFIG_PACKAGE_luci-app-daede=y
+
 # LuCI / 科学上网 / 代理
 CONFIG_PACKAGE_luci-app-passwall=y
 CONFIG_PACKAGE_luci-app-daede=y
