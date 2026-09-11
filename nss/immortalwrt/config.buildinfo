@@ -318,7 +318,7 @@ CONFIG_COREMARK_NUMBER_OF_THREADS=16
 
 # LuCI / 主题
 CONFIG_PACKAGE_luci-theme-bootstrap=y
-CONFIG_PACKAGE_luci-theme-design=y
+CONFIG_PACKAGE_luci-theme-design=n
 # CONFIG_PACKAGE_luci-theme-argon is not set
 # CONFIG_PACKAGE_luci-theme-aurora is not set
 # CONFIG_PACKAGE_luci-theme-material is not set
